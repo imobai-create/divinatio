@@ -1,0 +1,31 @@
+{
+  "name": "divinatio",
+  "version": "0.1.0",
+  "description": "Protocolo descentralizado de mercados de previsão peer-to-peer",
+  "scripts": {
+    "test": "hardhat test",
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deploy.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/imobai-create/divinatio"
+  },
+  "keywords": [
+    "blockchain",
+    "prediction-market",
+    "solidity",
+    "ethereum",
+    "p2p"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",
+    "@nomicfoundation/hardhat-ethers": "^3.1.3",
+    "@nomicfoundation/hardhat-network-helpers": "^1.1.2",
+    "chai": "^4.5.0",
+    "ethers": "^6.16.0",
+    "hardhat": "^2.28.6",
+    "solc": "0.8.24"
+  }
+}
