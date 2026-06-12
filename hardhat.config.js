@@ -21,12 +21,27 @@ subtask(TASK_COMPILE_SOLIDITY_GET_SOLC_BUILD, async (args, hre, runSuper) => {
   return runSuper(args);
 });
 
+const accounts = process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [];
+
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
     version: "0.8.24",
     settings: {
       optimizer: { enabled: true, runs: 200 },
+    },
+  },
+  networks: {
+    // Testnets públicas: defina PRIVATE_KEY (carteira com fundos de faucet)
+    baseSepolia: {
+      url: process.env.RPC_URL || "https://sepolia.base.org",
+      chainId: 84532,
+      accounts,
+    },
+    sepolia: {
+      url: process.env.RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com",
+      chainId: 11155111,
+      accounts,
     },
   },
 };

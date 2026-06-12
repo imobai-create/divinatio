@@ -574,7 +574,7 @@ button {
 
 .diviner-row {
   display: grid;
-  grid-template-columns: 52px 1fr auto auto auto;
+  grid-template-columns: 52px 1fr auto auto auto auto;
   align-items: center;
   gap: 18px;
   padding: 16px 20px;
@@ -629,6 +629,14 @@ button {
   font-size: 0.72rem;
   font-weight: 700;
   color: var(--gold-soft);
+}
+
+.follow-form {
+  background: rgba(240, 199, 94, 0.05);
+  border: 1px dashed rgba(240, 199, 94, 0.3);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin: -4px 0 14px;
 }
 
 /* ---------------------------------------------------------------- create form */

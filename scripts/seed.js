@@ -1,18 +1,37 @@
 const { ethers } = require("hardhat");
 
-// Popula a rede local com mercados e previsões de demonstração.
+// Popula a rede local com mercados e previsões de demonstração, incluindo um
+// exemplo de copy-staking (dave segue alice).
 // Uso: npx hardhat run scripts/seed.js --network localhost
 async function main() {
   const [deployer, alice, bob, carol, dave] = await ethers.getSigners();
+  const signers = [deployer, alice, bob, carol, dave];
+
+  const MockStablecoin = await ethers.getContractFactory("MockStablecoin");
+  const token = await MockStablecoin.deploy();
+  await token.waitForDeployment();
+  const tokenAddress = await token.getAddress();
+  console.log("MockStablecoin (dUSD) implantado em:", tokenAddress);
 
   const Divinatio = await ethers.getContractFactory("Divinatio");
-  const divinatio = await Divinatio.deploy(deployer.address);
+  const divinatio = await Divinatio.deploy(
+    deployer.address,
+    tokenAddress,
+    ethers.parseEther("10")
+  );
   await divinatio.waitForDeployment();
   const address = await divinatio.getAddress();
   console.log("Divinatio implantado em:", address);
 
+  // todos pegam dUSD no faucet e aprovam o protocolo
+  for (const s of signers) {
+    await (await token.connect(s).faucet()).wait();
+    await (await token.connect(s).approve(address, ethers.MaxUint256)).wait();
+  }
+
   const now = (await ethers.provider.getBlock("latest")).timestamp;
   const DAY = 24 * 60 * 60;
+  const dusd = (v) => ethers.parseEther(String(v));
 
   // Convenção de rótulos: linha 1 é a pergunta; as linhas seguintes nomeiam
   // os desfechos (o frontend interpreta esse formato).
@@ -23,11 +42,11 @@ async function main() {
       close: now + 30 * DAY,
       deadline: now + 32 * DAY,
       stakes: [
-        [alice, 0, "2.5"],
-        [bob, 1, "1.8"],
-        [carol, 2, "0.9"],
-        [dave, 0, "1.2"],
-        [bob, 3, "0.4"],
+        [alice, 0, 250],
+        [bob, 1, 180],
+        [carol, 2, 90],
+        [dave, 0, 120],
+        [bob, 3, 40],
       ],
     },
     {
@@ -36,9 +55,9 @@ async function main() {
       close: now + 60 * DAY,
       deadline: now + 62 * DAY,
       stakes: [
-        [alice, 0, "0.7"],
-        [carol, 1, "1.1"],
-        [dave, 1, "0.5"],
+        [alice, 0, 70],
+        [carol, 1, 110],
+        [dave, 1, 50],
       ],
     },
     {
@@ -48,9 +67,9 @@ async function main() {
       close: now + 90 * DAY,
       deadline: now + 92 * DAY,
       stakes: [
-        [bob, 0, "0.3"],
-        [carol, 1, "0.6"],
-        [alice, 2, "0.2"],
+        [bob, 0, 30],
+        [carol, 1, 60],
+        [alice, 2, 20],
       ],
     },
   ];
@@ -61,18 +80,20 @@ async function main() {
       .createMarket(m.question, m.outcomes, m.close, m.deadline, 100);
     await tx.wait();
     const id = (await divinatio.marketCount()) - 1n;
-    for (const [signer, outcome, eth] of m.stakes) {
-      await (
-        await divinatio
-          .connect(signer)
-          .predict(id, outcome, { value: ethers.parseEther(eth) })
-      ).wait();
+    for (const [signer, outcome, amount] of m.stakes) {
+      await (await divinatio.connect(signer).predict(id, outcome, dusd(amount))).wait();
     }
-    console.log(`Mercado ${id}: "${m.question}" com ${m.stakes.length} previsões`);
+    console.log(`Mercado ${id}: "${m.question.split("\n")[0]}" com ${m.stakes.length} previsões`);
   }
+
+  // demonstração de copy-staking: dave segue alice e a cópia é executada no mercado 0
+  await (await divinatio.connect(dave).follow(alice.address, dusd(25))).wait();
+  await (await divinatio.copyPredict(0, alice.address, dave.address)).wait();
+  console.log("Copy-staking: dave seguiu alice (25 dUSD/mercado) e copiou o mercado 0");
 
   console.log("\nSeed concluído. Exporte para o backend/frontend:");
   console.log(`CONTRACT_ADDRESS=${address}`);
+  console.log(`TOKEN_ADDRESS=${tokenAddress}`);
 }
 
 main().catch((error) => {

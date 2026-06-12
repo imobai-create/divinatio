@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { fmtEth } from "../util";
+import { CURRENCY, fmtEth } from "../util";
 import { MarketCard } from "../components";
 
 export default function Home() {
@@ -51,7 +51,7 @@ export default function Home() {
           <div className="stats-row">
             <Stat value={stats.markets} label="Mercados" />
             <Stat value={stats.openMarkets} label="Abertos agora" />
-            <Stat value={`${fmtEth(stats.totalVolume, 2)} ETH`} label="Volume em jogo" />
+            <Stat value={`${fmtEth(stats.totalVolume, 0)} ${CURRENCY}`} label="Volume em jogo" />
             <Stat value={stats.predictions} label="Previsões" />
             <Stat value={stats.diviners} label="Profetas" />
           </div>
