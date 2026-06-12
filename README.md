@@ -86,23 +86,62 @@ macro). As lacunas exploráveis onde DIVINATIO pode ser primeiro:
 contracts/Divinatio.sol   — contrato do protocolo (parimutuel, escrow, reputação)
 test/Divinatio.test.js    — 14 testes cobrindo o ciclo de vida completo
 scripts/deploy.js         — deploy via Hardhat
+scripts/seed.js           — popula a rede local com mercados de demonstração
+shared/DivinatioABI.json  — ABI compartilhada entre backend e frontend
+backend/                  — API REST + indexador on-chain (Express + ethers)
+frontend/                 — web app (React + Vite): mercados, apostas, Profetas
 ```
 
-## Rodando
+## Rodando o stack completo (rede local)
 
 ```bash
+# 1. Contratos — instala, testa e sobe a rede local
 npm install
-npm test          # compila e roda a suíte
-npm run deploy    # deploy na rede local do Hardhat
+npm test
+npx hardhat node                                    # terminal 1
+
+# 2. Deploy + mercados de demonstração
+npx hardhat run scripts/seed.js --network localhost # terminal 2
+
+# 3. Backend (API em http://localhost:3001)
+cd backend && npm install && npm start              # terminal 3
+
+# 4. Frontend (web app em http://localhost:5173)
+cd frontend && npm install && npm run dev           # terminal 4
 ```
+
+Para apostar pelo navegador, conecte a MetaMask à rede local
+(`http://127.0.0.1:8545`, chain id `31337`) e importe uma das contas de teste
+exibidas pelo `npx hardhat node`.
+
+### Backend (API)
+
+| Endpoint | Descrição |
+|---|---|
+| `GET /api/markets` | Lista mercados com pools, estado e odds (filtro `?state=open`) |
+| `GET /api/markets/:id` | Detalhe do mercado + últimas previsões |
+| `GET /api/leaderboard` | Ranking de Profetas por precisão on-chain |
+| `GET /api/stats` | Volume total, mercados abertos, previsões |
+
+Configuração por variáveis de ambiente: `RPC_URL`, `CONTRACT_ADDRESS`, `PORT`.
+
+### Frontend
+
+Tema místico (violeta/dourado, glassmorphism) com odds animadas que emergem
+dos pools, countdown ao vivo, simulador interativo de retorno ("se X vencer,
+você recebe ~N ETH"), conexão MetaMask para apostar/criar mercados/sacar, e o
+Ranking de Profetas com anéis de precisão. Configuração: `VITE_API_URL`,
+`VITE_CONTRACT_ADDRESS`.
 
 ## Roadmap
 
 - [x] MVP do protocolo: mercados parimutuais P2P com resolução otimista
 - [x] Reputação on-chain de Profetas
+- [x] Backend: API REST + indexador on-chain
+- [x] Frontend web com apostas via MetaMask e Ranking de Profetas
 - [ ] Suporte a stablecoin (USDC/BRL-pegged) em vez de ETH nativo
 - [ ] Copy-staking: seguir Profetas com taxa de performance
 - [ ] Oráculo descentralizado (UMA Optimistic Oracle ou Kleros) no lugar do árbitro
-- [ ] Frontend web + ligas e rankings por categoria
+- [ ] Ligas e rankings por categoria; persistência do indexador (The Graph/SQLite)
 - [ ] Auditoria de segurança antes de qualquer mainnet
 - [ ] Parecer jurídico (Lei 14.790/2023, CVM, jurisdição de operação)
