@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../api";
 import { predict, claim } from "../eth";
-import { parseQuestion, fmtEth, shortAddr, PROTOCOL_FEE_BPS } from "../util";
+import { CURRENCY, parseQuestion, fmtEth, shortAddr, PROTOCOL_FEE_BPS } from "../util";
 import { OddsList, StateBadge, Countdown } from "../components";
 
 export default function MarketPage({ account, onConnect, notify }) {
   const { id } = useParams();
   const [market, setMarket] = useState(null);
   const [selected, setSelected] = useState(0);
-  const [amount, setAmount] = useState("0.1");
+  const [amount, setAmount] = useState("10");
   const [busy, setBusy] = useState(false);
 
   const load = () => api.market(id).then(setMarket).catch(() => {});
@@ -52,7 +52,7 @@ export default function MarketPage({ account, onConnect, notify }) {
     setBusy(true);
     try {
       await predict(market.id, selected, amount);
-      notify(`Previsão registrada: ${amount} ETH em "${labels[selected]}" 🔮`, "success");
+      notify(`Previsão registrada: ${amount} dUSD em "${labels[selected]}" 🔮`, "success");
       load();
     } catch (e) {
       notify(e.shortMessage || e.message, "error");
@@ -85,7 +85,7 @@ export default function MarketPage({ account, onConnect, notify }) {
               ⏳ Fecha em <Countdown to={market.closeTime} />
             </span>
           )}
-          <span>💰 {fmtEth(market.totalPool)} ETH em jogo</span>
+          <span>💰 {fmtEth(market.totalPool)} {CURRENCY} em jogo</span>
           <span>✍️ criador {shortAddr(market.creator)}</span>
         </div>
         <h2>{question}</h2>
@@ -103,7 +103,7 @@ export default function MarketPage({ account, onConnect, notify }) {
                 <div key={i} className="pred-item">
                   <span className="addr">{shortAddr(p.diviner)}</span>
                   <span>{labels[p.outcome]}</span>
-                  <span className="amt">{fmtEth(p.amount)} ETH</span>
+                  <span className="amt">{fmtEth(p.amount)} {CURRENCY}</span>
                 </div>
               ))}
             </div>
@@ -128,7 +128,7 @@ export default function MarketPage({ account, onConnect, notify }) {
               </select>
             </div>
             <div>
-              <label className="input-label">Valor (ETH)</label>
+              <label className="input-label">Valor ({CURRENCY})</label>
               <input
                 className="input"
                 type="number"
@@ -141,7 +141,7 @@ export default function MarketPage({ account, onConnect, notify }) {
             {estimate && (
               <div className="payout-box">
                 Se &ldquo;{labels[selected]}&rdquo; vencer, você recebe cerca de
-                <div className="big">{fmtEth(estimate.payout.toString())} ETH</div>
+                <div className="big">{fmtEth(estimate.payout.toString())} {CURRENCY}</div>
                 (~{estimate.mult.toFixed(2)}x) com os pools atuais
               </div>
             )}

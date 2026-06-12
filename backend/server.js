@@ -1,11 +1,16 @@
+const path = require("path");
+const fs = require("fs");
 const express = require("express");
 const cors = require("cors");
 const { Indexer } = require("./indexer");
 
 const PORT = process.env.PORT || 3001;
 const RPC_URL = process.env.RPC_URL || "http://127.0.0.1:8545";
+// padrão = endereços determinísticos do scripts/seed.js na rede local do Hardhat
 const CONTRACT_ADDRESS =
-  process.env.CONTRACT_ADDRESS || "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+  process.env.CONTRACT_ADDRESS || "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
+const TOKEN_ADDRESS =
+  process.env.TOKEN_ADDRESS || "0x5FbDB2315678afecb367f032d93F642f64180aa3";
 
 const app = express();
 app.use(cors());
@@ -14,7 +19,12 @@ app.use(express.json());
 const indexer = new Indexer(RPC_URL, CONTRACT_ADDRESS);
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, ready: indexer.ready, contract: CONTRACT_ADDRESS });
+  res.json({ ok: true, ready: indexer.ready, contract: CONTRACT_ADDRESS, token: TOKEN_ADDRESS });
+});
+
+// configuração que o frontend consome em runtime (evita rebuild por endereço)
+app.get("/api/config", (req, res) => {
+  res.json({ contractAddress: CONTRACT_ADDRESS, tokenAddress: TOKEN_ADDRESS, rpcUrl: RPC_URL });
 });
 
 app.get("/api/markets", (req, res) => {
@@ -36,6 +46,14 @@ app.get("/api/leaderboard", (req, res) => {
 app.get("/api/stats", (req, res) => {
   res.json(indexer.getStats());
 });
+
+// Em produção (Railway), o backend também serve o frontend compilado.
+const distDir = path.join(__dirname, "..", "frontend", "dist");
+if (fs.existsSync(distDir)) {
+  app.use(express.static(distDir));
+  app.get(/^\/(?!api).*/, (req, res) => res.sendFile(path.join(distDir, "index.html")));
+  console.log("Servindo frontend estático de", distDir);
+}
 
 indexer
   .start()

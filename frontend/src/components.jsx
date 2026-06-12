@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
-import { STATE_PT, parseQuestion, poolShares, impliedMultipliers, fmtEth, timeLeft } from "./util";
+import { CURRENCY, STATE_PT, parseQuestion, poolShares, impliedMultipliers, fmtEth, timeLeft } from "./util";
 
-export function Navbar({ account, onConnect }) {
+export function Navbar({ account, balance, onConnect, onFaucet }) {
   return (
     <nav className="navbar">
       <div className="container navbar-inner">
@@ -14,6 +14,11 @@ export function Navbar({ account, onConnect }) {
           <NavLink to="/profetas">Profetas</NavLink>
           <NavLink to="/criar">Criar mercado</NavLink>
         </div>
+        {account && (
+          <button className="btn" onClick={onFaucet} title={`Receba 1.000 ${CURRENCY} de teste`}>
+            🚰 {balance !== null ? `${fmtEth(balance, 0)} ${CURRENCY}` : "…"}
+          </button>
+        )}
         <button className="btn btn-wallet" onClick={onConnect}>
           {account ? `🜂 ${account.slice(0, 6)}…${account.slice(-4)}` : "Conectar carteira"}
         </button>
@@ -86,7 +91,7 @@ export function MarketCard({ market }) {
         <div className="question">{question}</div>
         <OddsList market={market} compact />
         <div className="market-meta">
-          <span>💰 {fmtEth(market.totalPool)} ETH em jogo</span>
+          <span>💰 {fmtEth(market.totalPool)} {CURRENCY} em jogo</span>
           <span>{market.predictionCount} previsões</span>
         </div>
       </div>

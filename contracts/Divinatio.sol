@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+interface IERC20 {
+    function transfer(address to, uint256 value) external returns (bool);
+    function transferFrom(address from, address to, uint256 value) external returns (bool);
+}
+
 /// @title DIVINATIO — Mercados de previsão peer-to-peer
 /// @notice Protocolo de pools parimutuais onde usuários apostam uns contra os
-///         outros em eventos futuros. O protocolo nunca é contraparte de
-///         nenhuma posição: atua exclusivamente como intermediador,
-///         custodiando os pools em escrow e cobrando taxa de serviço.
+///         outros em eventos futuros, usando uma stablecoin (ERC-20). O
+///         protocolo nunca é contraparte de nenhuma posição: atua
+///         exclusivamente como intermediador, custodiando os pools em escrow
+///         e cobrando taxa de serviço.
 ///
 ///         Fluxo de um mercado:
 ///           1. createMarket  — qualquer endereço cria um mercado (permissionless)
@@ -15,6 +21,12 @@ pragma solidity ^0.8.24;
 ///           5. finalize      — sem disputa, o resultado proposto vale
 ///           6. claim         — vencedores sacam stake + fração pro-rata do pool perdedor
 ///           — cancelMarket   — se ninguém resolver até o prazo, reembolso integral
+///
+///         Copy-staking (o "seguir Profetas"):
+///           - follow(profeta, valor) — opta por replicar as previsões do profeta
+///           - copyPredict(...)       — executável por qualquer keeper: replica a
+///             posição dominante do profeta para o seguidor, no mesmo mercado
+///           - no claim, o profeta recebe 10% do LUCRO da posição copiada
 contract Divinatio {
     // ---------------------------------------------------------------------
     // Tipos
@@ -48,21 +60,34 @@ contract Divinatio {
     struct DivinerStats {
         uint64 predictions;          // mercados em que participou
         uint64 hits;                 // mercados em que acertou o desfecho
-        uint256 volume;              // total já depositado (wei)
+        uint256 volume;              // total já depositado
+    }
+
+    struct FollowConfig {
+        uint256 amountPerMarket;     // quanto replicar por mercado (0 = inativo)
+    }
+
+    struct CopiedPosition {
+        address prophet;
+        uint8 outcome;
+        uint256 amount;
     }
 
     // ---------------------------------------------------------------------
     // Constantes e estado
     // ---------------------------------------------------------------------
 
-    uint16 public constant PROTOCOL_FEE_BPS = 200;   // 2% sobre o pool perdedor
-    uint16 public constant MAX_CREATOR_FEE_BPS = 100; // criador pode cobrar até 1%
+    uint16 public constant PROTOCOL_FEE_BPS = 200;     // 2% sobre o pool perdedor
+    uint16 public constant MAX_CREATOR_FEE_BPS = 100;  // criador pode cobrar até 1%
+    uint16 public constant PROPHET_FEE_BPS = 1000;     // 10% do lucro da posição copiada
     uint64 public constant DISPUTE_WINDOW = 24 hours;
-    uint64 public constant CANCEL_GRACE = 7 days;     // após o prazo de resolução
-    uint256 public constant RESOLUTION_BOND = 0.01 ether;
+    uint64 public constant CANCEL_GRACE = 7 days;      // após o prazo de resolução
     uint8 public constant MAX_OUTCOMES = 8;
 
-    address public owner;            // árbitro de disputas (DAO no roadmap)
+    IERC20 public immutable token;        // stablecoin do protocolo (ex.: USDC)
+    uint256 public immutable resolutionBond;
+
+    address public owner;                 // árbitro de disputas (DAO no roadmap)
     address public treasury;
     uint256 public accruedProtocolFees;
 
@@ -79,6 +104,11 @@ contract Divinatio {
     // reputação on-chain dos profetas
     mapping(address => DivinerStats) public diviners;
 
+    // copy-staking
+    mapping(address => mapping(address => FollowConfig)) public follows; // seguidor => profeta
+    mapping(uint256 => mapping(address => CopiedPosition)) public copiedPositions; // mercado => seguidor
+    mapping(address => uint256) public prophetFees; // taxas de performance acumuladas
+
     // ---------------------------------------------------------------------
     // Eventos
     // ---------------------------------------------------------------------
@@ -91,6 +121,9 @@ contract Divinatio {
     event MarketCancelled(uint256 indexed marketId);
     event Claimed(uint256 indexed marketId, address indexed diviner, uint256 payout);
     event Refunded(uint256 indexed marketId, address indexed diviner, uint256 amount);
+    event Followed(address indexed follower, address indexed prophet, uint256 amountPerMarket);
+    event Unfollowed(address indexed follower, address indexed prophet);
+    event Copied(uint256 indexed marketId, address indexed follower, address indexed prophet, uint8 outcome, uint256 amount);
 
     // ---------------------------------------------------------------------
     // Modificadores
@@ -101,10 +134,14 @@ contract Divinatio {
         _;
     }
 
-    constructor(address treasury_) {
+    constructor(address treasury_, address token_, uint256 resolutionBond_) {
         require(treasury_ != address(0), "Divinatio: treasury is zero");
+        require(token_ != address(0), "Divinatio: token is zero");
+        require(resolutionBond_ > 0, "Divinatio: bond is zero");
         owner = msg.sender;
         treasury = treasury_;
+        token = IERC20(token_);
+        resolutionBond = resolutionBond_;
     }
 
     // ---------------------------------------------------------------------
@@ -142,24 +179,59 @@ contract Divinatio {
     // Previsões (stake P2P)
     // ---------------------------------------------------------------------
 
-    function predict(uint256 marketId, uint8 outcome) external payable {
+    function predict(uint256 marketId, uint8 outcome, uint256 amount) external {
+        _pull(msg.sender, amount);
+        _stake(marketId, msg.sender, outcome, amount);
+    }
+
+    // ---------------------------------------------------------------------
+    // Copy-staking
+    // ---------------------------------------------------------------------
+
+    /// @notice Passa a replicar as previsões do profeta com `amountPerMarket`
+    ///         por mercado. Requer aprovação (allowance) do token para o
+    ///         protocolo puxar o valor quando a cópia for executada.
+    function follow(address prophet, uint256 amountPerMarket) external {
+        require(prophet != address(0) && prophet != msg.sender, "Divinatio: invalid prophet");
+        require(amountPerMarket > 0, "Divinatio: zero amount");
+        follows[msg.sender][prophet] = FollowConfig(amountPerMarket);
+        emit Followed(msg.sender, prophet, amountPerMarket);
+    }
+
+    function unfollow(address prophet) external {
+        delete follows[msg.sender][prophet];
+        emit Unfollowed(msg.sender, prophet);
+    }
+
+    /// @notice Replica para o seguidor a posição DOMINANTE do profeta no
+    ///         mercado (o desfecho onde ele tem mais valor). Executável por
+    ///         qualquer keeper; o valor sai do saldo do próprio seguidor.
+    ///         Uma cópia por seguidor por mercado.
+    function copyPredict(uint256 marketId, address prophet, address follower) external {
         Market storage m = _market(marketId);
-        require(m.state == MarketState.Open, "Divinatio: market not open");
-        require(block.timestamp < m.closeTime, "Divinatio: predictions closed");
-        require(outcome < m.outcomeCount, "Divinatio: invalid outcome");
-        require(msg.value > 0, "Divinatio: zero stake");
+        require(m.state == MarketState.Open && block.timestamp < m.closeTime, "Divinatio: market not open");
 
-        m.pools[outcome] += msg.value;
-        stakeOf[marketId][msg.sender][outcome] += msg.value;
+        uint256 amount = follows[follower][prophet].amountPerMarket;
+        require(amount > 0, "Divinatio: not following");
+        require(copiedPositions[marketId][follower].amount == 0, "Divinatio: already copied");
 
-        DivinerStats storage stats = diviners[msg.sender];
-        if (!hasPredicted[marketId][msg.sender]) {
-            hasPredicted[marketId][msg.sender] = true;
-            stats.predictions += 1;
+        // desfecho dominante do profeta neste mercado
+        uint8 outcome = 0;
+        uint256 best = 0;
+        for (uint8 i = 0; i < m.outcomeCount; i++) {
+            uint256 s = stakeOf[marketId][prophet][i];
+            if (s > best) {
+                best = s;
+                outcome = i;
+            }
         }
-        stats.volume += msg.value;
+        require(best > 0, "Divinatio: prophet has no stake");
 
-        emit Predicted(marketId, msg.sender, outcome, msg.value);
+        copiedPositions[marketId][follower] = CopiedPosition(prophet, outcome, amount);
+        _pull(follower, amount);
+        _stake(marketId, follower, outcome, amount);
+
+        emit Copied(marketId, follower, prophet, outcome, amount);
     }
 
     // ---------------------------------------------------------------------
@@ -167,14 +239,14 @@ contract Divinatio {
     // ---------------------------------------------------------------------
 
     /// @notice Após o fechamento, qualquer pessoa propõe o resultado depositando caução.
-    function proposeOutcome(uint256 marketId, uint8 outcome) external payable {
+    function proposeOutcome(uint256 marketId, uint8 outcome) external {
         Market storage m = _market(marketId);
         require(m.state == MarketState.Open, "Divinatio: not awaiting resolution");
         require(block.timestamp >= m.closeTime, "Divinatio: market still open");
         require(block.timestamp <= m.resolutionDeadline, "Divinatio: resolution deadline passed");
         require(outcome < m.outcomeCount, "Divinatio: invalid outcome");
-        require(msg.value == RESOLUTION_BOND, "Divinatio: wrong bond");
 
+        _pull(msg.sender, resolutionBond);
         m.state = MarketState.Proposed;
         m.proposedOutcome = outcome;
         m.proposer = msg.sender;
@@ -184,12 +256,12 @@ contract Divinatio {
     }
 
     /// @notice Dentro da janela, qualquer pessoa pode contestar com caução igual.
-    function dispute(uint256 marketId) external payable {
+    function dispute(uint256 marketId) external {
         Market storage m = _market(marketId);
         require(m.state == MarketState.Proposed, "Divinatio: nothing to dispute");
         require(block.timestamp < m.disputeWindowEnd, "Divinatio: dispute window closed");
-        require(msg.value == RESOLUTION_BOND, "Divinatio: wrong bond");
 
+        _pull(msg.sender, resolutionBond);
         m.state = MarketState.Disputed;
         m.disputer = msg.sender;
 
@@ -204,7 +276,7 @@ contract Divinatio {
 
         address proposer = m.proposer;
         _settle(marketId, m, m.proposedOutcome);
-        _send(proposer, RESOLUTION_BOND);
+        _push(proposer, resolutionBond);
     }
 
     /// @notice O árbitro decide disputas. A caução do perdedor vai para o vencedor.
@@ -216,7 +288,7 @@ contract Divinatio {
 
         address bondWinner = outcome == m.proposedOutcome ? m.proposer : m.disputer;
         _settle(marketId, m, outcome);
-        _send(bondWinner, 2 * RESOLUTION_BOND);
+        _push(bondWinner, 2 * resolutionBond);
     }
 
     /// @notice Sem resolução dentro do prazo + carência, o mercado é cancelado
@@ -232,8 +304,8 @@ contract Divinatio {
         address proposer = m.proposer;
         address disputer = m.disputer;
         m.state = MarketState.Cancelled;
-        if (proposer != address(0)) _send(proposer, RESOLUTION_BOND);
-        if (disputer != address(0)) _send(disputer, RESOLUTION_BOND);
+        if (proposer != address(0)) _push(proposer, resolutionBond);
+        if (disputer != address(0)) _push(disputer, resolutionBond);
 
         emit MarketCancelled(marketId);
     }
@@ -243,7 +315,8 @@ contract Divinatio {
     // ---------------------------------------------------------------------
 
     /// @notice Vencedores sacam o próprio stake mais a fração pro-rata do pool
-    ///         perdedor (líquido de taxas). Em mercado cancelado, saca o reembolso.
+    ///         perdedor (líquido de taxas). Posições copiadas pagam 10% do
+    ///         LUCRO ao profeta seguido. Em mercado cancelado, saca o reembolso.
     function claim(uint256 marketId) external {
         Market storage m = _market(marketId);
         require(!claimed[marketId][msg.sender], "Divinatio: already claimed");
@@ -255,7 +328,7 @@ contract Divinatio {
                 refund += stakeOf[marketId][msg.sender][i];
             }
             require(refund > 0, "Divinatio: nothing to refund");
-            _send(msg.sender, refund);
+            _push(msg.sender, refund);
             emit Refunded(marketId, msg.sender, refund);
             return;
         }
@@ -265,9 +338,19 @@ contract Divinatio {
         require(winningStake > 0, "Divinatio: nothing to claim");
 
         uint256 payout = winningStake + (m.losingPoolNet * winningStake) / m.pools[m.finalOutcome];
+
+        // taxa de performance do profeta sobre o lucro da posição copiada
+        CopiedPosition storage cp = copiedPositions[marketId][msg.sender];
+        if (cp.amount > 0 && cp.outcome == m.finalOutcome) {
+            uint256 copiedProfit = (m.losingPoolNet * cp.amount) / m.pools[m.finalOutcome];
+            uint256 prophetFee = (copiedProfit * PROPHET_FEE_BPS) / 10_000;
+            payout -= prophetFee;
+            prophetFees[cp.prophet] += prophetFee;
+        }
+
         diviners[msg.sender].hits += 1;
 
-        _send(msg.sender, payout);
+        _push(msg.sender, payout);
         emit Claimed(marketId, msg.sender, payout);
     }
 
@@ -275,14 +358,21 @@ contract Divinatio {
         uint256 amount = creatorFees[msg.sender];
         require(amount > 0, "Divinatio: no fees");
         creatorFees[msg.sender] = 0;
-        _send(msg.sender, amount);
+        _push(msg.sender, amount);
+    }
+
+    function withdrawProphetFees() external {
+        uint256 amount = prophetFees[msg.sender];
+        require(amount > 0, "Divinatio: no fees");
+        prophetFees[msg.sender] = 0;
+        _push(msg.sender, amount);
     }
 
     function withdrawProtocolFees() external {
         uint256 amount = accruedProtocolFees;
         require(amount > 0, "Divinatio: no fees");
         accruedProtocolFees = 0;
-        _send(treasury, amount);
+        _push(treasury, amount);
     }
 
     // ---------------------------------------------------------------------
@@ -341,6 +431,26 @@ contract Divinatio {
         return _markets[marketId];
     }
 
+    function _stake(uint256 marketId, address diviner, uint8 outcome, uint256 amount) private {
+        Market storage m = _market(marketId);
+        require(m.state == MarketState.Open, "Divinatio: market not open");
+        require(block.timestamp < m.closeTime, "Divinatio: predictions closed");
+        require(outcome < m.outcomeCount, "Divinatio: invalid outcome");
+        require(amount > 0, "Divinatio: zero stake");
+
+        m.pools[outcome] += amount;
+        stakeOf[marketId][diviner][outcome] += amount;
+
+        DivinerStats storage stats = diviners[diviner];
+        if (!hasPredicted[marketId][diviner]) {
+            hasPredicted[marketId][diviner] = true;
+            stats.predictions += 1;
+        }
+        stats.volume += amount;
+
+        emit Predicted(marketId, diviner, outcome, amount);
+    }
+
     function _settle(uint256 marketId, Market storage m, uint8 outcome) private {
         // Pool vencedor vazio: ninguém para receber o pool perdedor — cancela
         // e devolve 100% a todos (o protocolo nunca fica com stake de usuário).
@@ -367,8 +477,16 @@ contract Divinatio {
         emit MarketResolved(marketId, outcome);
     }
 
-    function _send(address to, uint256 amount) private {
-        (bool ok, ) = payable(to).call{value: amount}("");
-        require(ok, "Divinatio: transfer failed");
+    function _pull(address from, uint256 amount) private {
+        _callToken(abi.encodeWithSelector(IERC20.transferFrom.selector, from, address(this), amount));
+    }
+
+    function _push(address to, uint256 amount) private {
+        _callToken(abi.encodeWithSelector(IERC20.transfer.selector, to, amount));
+    }
+
+    function _callToken(bytes memory data) private {
+        (bool ok, bytes memory ret) = address(token).call(data);
+        require(ok && (ret.length == 0 || abi.decode(ret, (bool))), "Divinatio: token transfer failed");
     }
 }

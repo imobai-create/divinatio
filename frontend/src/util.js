@@ -1,6 +1,7 @@
 import { formatEther } from "ethers";
 
 export const PROTOCOL_FEE_BPS = 200;
+export const CURRENCY = "dUSD";
 
 export const STATE_PT = {
   open: "Aberto",
