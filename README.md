@@ -115,11 +115,57 @@ Dockerfile / railway.json    — deploy de serviço único na Railway
 
 ## Onde vejo o site?
 
-- **Local**: siga "Rodando o stack completo" abaixo → `http://localhost:5173`
+- **Local**: baixe o projeto e rode `./start.sh` (passo a passo na seção
+  seguinte) → abre em `http://localhost:5173`
 - **Público**: faça o deploy na Railway (seção abaixo) → a Railway gera uma
   URL `https://<seu-projeto>.up.railway.app` com o site e a API juntos
 
-## Rodando o stack completo (rede local)
+## Rodando na sua máquina (passo a passo para quem não programa)
+
+> **Antes de tudo, uma vez só:** instale o **Node.js LTS** em
+> [nodejs.org](https://nodejs.org) (botão verde, instalação padrão).
+
+**Passo 1 — Baixe o projeto.** Abra o aplicativo **Terminal** e cole estas
+linhas, uma de cada vez, apertando Enter após cada uma:
+
+```bash
+cd ~/Desktop
+git clone https://github.com/imobai-create/divinatio.git
+cd divinatio
+```
+
+> Se o Mac perguntar se quer instalar as "ferramentas de linha de comando",
+> aceite, aguarde terminar e repita o `git clone`. (Alternativa sem git: no
+> GitHub, botão verde **Code → Download ZIP**, descompacte na Mesa e rode
+> `cd ~/Desktop/divinatio-main`.)
+
+**Passo 2 — Ligue tudo com um comando:**
+
+```bash
+./start.sh
+```
+
+Na primeira vez ele instala as dependências (demora alguns minutos); depois
+sobe a blockchain local, cria os mercados de demonstração, a API e o site.
+Quando aparecer "✅ Tudo no ar", abra **http://localhost:5173** no navegador.
+Para desligar, volte ao Terminal e aperte `Ctrl+C`.
+
+**Passo 3 — Para apostar de verdade no site (opcional):** instale a extensão
+[MetaMask](https://metamask.io) no navegador e:
+
+1. Na MetaMask: **Adicionar rede → Adicionar manualmente** com
+   RPC `http://127.0.0.1:8545`, chain ID `31337`, símbolo `ETH`.
+2. **Importar conta** e cole esta chave de teste (ela só vale na blockchain
+   local da sua máquina, não use para nada real):
+   `0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba`
+3. No site, clique em **Conectar carteira** e depois no **🚰** para receber
+   1.000 dUSD de teste. Pronto, pode apostar, criar mercados e seguir Profetas.
+
+> ⚠️ Importante: rodando localmente, o site só existe no seu computador e
+> os dados zeram quando você desliga. Para uma URL pública permanente, veja
+> "Deploy na Railway" abaixo.
+
+### Rodando manualmente (alternativa para desenvolvedores)
 
 ```bash
 # 1. Contratos — instala, testa e sobe a rede local
