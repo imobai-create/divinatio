@@ -7,11 +7,12 @@ const {
   TASK_COMPILE_SOLIDITY_GET_SOLC_BUILD,
 } = require("hardhat/builtin-tasks/task-names");
 
-// Em máquinas normais (com internet), o Hardhat baixa o compilador NATIVO do
-// Solidity, que é rápido. Em ambientes com saída de rede restrita (ex.: o
-// sandbox de CI), defina USE_LOCAL_SOLC=1 para usar o compilador solc-js
-// empacotado via npm — funciona offline, porém é mais lento.
-if (process.env.USE_LOCAL_SOLC === "1") {
+// Por padrão usamos o compilador solc-js empacotado via npm: ele funciona
+// OFFLINE (sem baixar nada de binaries.soliditylang.org), o que é mais
+// confiável em máquinas/redes onde esse download trava. É um pouco mais
+// lento, mas dispensa rede. Para usar o compilador nativo (mais rápido,
+// porém exige download), defina USE_NATIVE_SOLC=1.
+if (process.env.USE_NATIVE_SOLC !== "1") {
   subtask(TASK_COMPILE_SOLIDITY_GET_SOLC_BUILD, async (args, hre, runSuper) => {
     if (args.solcVersion === "0.8.24") {
       return {
