@@ -28,10 +28,74 @@ app.get("/api/health", (req, res) => {
   res.json({ ok: true, ready: MOCK ? true : indexer.ready, mock: MOCK, contract: CONTRACT_ADDRESS, token: TOKEN_ADDRESS });
 });
 
-// configuração que o frontend consome em runtime (evita rebuild por endereço)
+const CHAIN_ID = Number(process.env.CHAIN_ID || 31337);
+
+// configuração que o frontend consome em runtime (evita rebuild por endereço).
+// publicRpcUrl = endereço público pelo qual a MetaMask fala com a blockchain
+// (passa pelo proxy /rpc deste servidor, já que a blockchain roda interna).
 app.get("/api/config", (req, res) => {
-  res.json({ contractAddress: CONTRACT_ADDRESS, tokenAddress: TOKEN_ADDRESS, rpcUrl: RPC_URL, mock: MOCK });
+  const host = req.get("x-forwarded-host") || req.get("host");
+  const proto = req.get("x-forwarded-proto") || req.protocol;
+  res.json({
+    contractAddress: CONTRACT_ADDRESS,
+    tokenAddress: TOKEN_ADDRESS,
+    rpcUrl: RPC_URL,
+    publicRpcUrl: `${proto}://${host}/rpc`,
+    chainId: CHAIN_ID,
+    mock: MOCK,
+  });
 });
+
+// Ponte JSON-RPC: a MetaMask (no navegador do usuário) fala com a blockchain
+// que roda dentro deste servidor. Sem MOCK e sem blockchain, isto fica inativo.
+if (!MOCK) {
+  app.post("/rpc", async (req, res) => {
+    try {
+      const upstream = await fetch(RPC_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req.body),
+      });
+      const data = await upstream.json();
+      res.json(data);
+    } catch (e) {
+      res.status(502).json({ error: "rpc proxy indisponível", detail: e.message });
+    }
+  });
+
+  // Torneira de gás: envia um pouco de ETH de teste para o endereço informado,
+  // para que visitantes consigam pagar o gás das transações (apostar etc.).
+  // Conta pagadora = conta #0 da rede de teste do Hardhat (chave pública e
+  // conhecida; só vale nesta rede de teste, sem valor real).
+  const { ethers } = require("ethers");
+  const GAS_FAUCET_KEY =
+    process.env.GAS_FAUCET_KEY ||
+    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+  const gasGiven = new Map(); // address -> timestamp (limite simples por endereço)
+  app.post("/api/gas", async (req, res) => {
+    try {
+      const address = String(req.query.address || req.body.address || "");
+      if (!ethers.isAddress(address)) {
+        return res.status(400).json({ error: "endereço inválido" });
+      }
+      const last = gasGiven.get(address.toLowerCase());
+      if (last && Date.now() - last < 60_000) {
+        return res.json({ ok: true, skipped: "já recebeu há pouco" });
+      }
+      const provider = new ethers.JsonRpcProvider(RPC_URL);
+      const wallet = new ethers.Wallet(GAS_FAUCET_KEY, provider);
+      const balance = await provider.getBalance(address);
+      if (balance < ethers.parseEther("0.5")) {
+        const tx = await wallet.sendTransaction({ to: address, value: ethers.parseEther("1") });
+        await tx.wait();
+        gasGiven.set(address.toLowerCase(), Date.now());
+      }
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(502).json({ error: "torneira de gás indisponível", detail: e.message });
+    }
+  });
+}
 
 app.get("/api/markets", (req, res) => {
   let markets = MOCK ? source.markets() : indexer.getMarkets();
