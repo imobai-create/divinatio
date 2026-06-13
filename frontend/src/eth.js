@@ -21,6 +21,9 @@ export function getConfig() {
           cfg.tokenAddress ||
           import.meta.env.VITE_TOKEN_ADDRESS ||
           "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        publicRpcUrl: cfg.publicRpcUrl || null,
+        chainId: cfg.chainId || 31337,
+        mock: cfg.mock || false,
       }));
   }
   return configPromise;
@@ -30,13 +33,51 @@ export function hasWallet() {
   return typeof window !== "undefined" && Boolean(window.ethereum);
 }
 
+/** Adiciona/troca a MetaMask para a rede do DIVINATIO (via proxy /rpc). */
+async function ensureNetwork() {
+  const { publicRpcUrl, chainId } = await getConfig();
+  if (!publicRpcUrl || !chainId) return;
+  const hexChain = "0x" + Number(chainId).toString(16);
+  try {
+    await window.ethereum.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: hexChain }],
+    });
+  } catch (err) {
+    if (err.code === 4902 || /Unrecognized chain|not been added/i.test(err.message || "")) {
+      await window.ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: hexChain,
+            chainName: "DIVINATIO Testnet",
+            nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+            rpcUrls: [publicRpcUrl],
+          },
+        ],
+      });
+    }
+    // se o usuário recusar, segue assim mesmo (pode já estar na rede certa)
+  }
+}
+
 export async function connectWallet() {
   if (!hasWallet()) {
     throw new Error("Nenhuma carteira encontrada. Instale a MetaMask para apostar.");
   }
   const provider = new BrowserProvider(window.ethereum);
   const accounts = await provider.send("eth_requestAccounts", []);
+  await ensureNetwork();
   return accounts[0];
+}
+
+/** Pede ETH de gás (torneira do servidor) para o endereço conseguir transacionar. */
+async function requestGas(address) {
+  try {
+    await fetch(`${API_URL}/api/gas?address=${address}`, { method: "POST" });
+  } catch {
+    // sem torneira (ex.: modo local puro) — segue; o usuário pode já ter gás
+  }
 }
 
 async function contracts() {
@@ -67,7 +108,9 @@ export async function tokenBalance(account) {
 }
 
 export async function faucet() {
-  const { token } = await contracts();
+  const { signer, token } = await contracts();
+  // garante ETH de gás antes de chamar o faucet de dUSD (que custa gás)
+  await requestGas(await signer.getAddress());
   const tx = await token.faucet();
   return tx.wait();
 }

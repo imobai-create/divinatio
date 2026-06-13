@@ -7,19 +7,24 @@ const {
   TASK_COMPILE_SOLIDITY_GET_SOLC_BUILD,
 } = require("hardhat/builtin-tasks/task-names");
 
-// Usa o compilador solc-js instalado via npm em vez de baixar o binário de
-// binaries.soliditylang.org (bloqueado em ambientes com egress restrito).
-subtask(TASK_COMPILE_SOLIDITY_GET_SOLC_BUILD, async (args, hre, runSuper) => {
-  if (args.solcVersion === "0.8.24") {
-    return {
-      compilerPath: path.join(__dirname, "node_modules", "solc", "soljson.js"),
-      isSolcJs: true,
-      version: args.solcVersion,
-      longVersion: "0.8.24",
-    };
-  }
-  return runSuper(args);
-});
+// Por padrão usamos o compilador solc-js empacotado via npm: ele funciona
+// OFFLINE (sem baixar nada de binaries.soliditylang.org), o que é mais
+// confiável em máquinas/redes onde esse download trava. É um pouco mais
+// lento, mas dispensa rede. Para usar o compilador nativo (mais rápido,
+// porém exige download), defina USE_NATIVE_SOLC=1.
+if (process.env.USE_NATIVE_SOLC !== "1") {
+  subtask(TASK_COMPILE_SOLIDITY_GET_SOLC_BUILD, async (args, hre, runSuper) => {
+    if (args.solcVersion === "0.8.24") {
+      return {
+        compilerPath: path.join(__dirname, "node_modules", "solc", "soljson.js"),
+        isSolcJs: true,
+        version: args.solcVersion,
+        longVersion: "0.8.24",
+      };
+    }
+    return runSuper(args);
+  });
+}
 
 const accounts = process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [];
 

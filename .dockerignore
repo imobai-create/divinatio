@@ -1,0 +1,9 @@
+node_modules
+**/node_modules
+frontend/dist
+artifacts
+cache
+coverage
+.git
+.env
+*.log
