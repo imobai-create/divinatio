@@ -24,6 +24,7 @@ export function getConfig() {
         publicRpcUrl: cfg.publicRpcUrl || null,
         chainId: cfg.chainId || 31337,
         mock: cfg.mock || false,
+        chainMode: cfg.chainMode || "local",
       }));
   }
   return configPromise;
@@ -33,7 +34,18 @@ export function hasWallet() {
   return typeof window !== "undefined" && Boolean(window.ethereum);
 }
 
-/** Adiciona/troca a MetaMask para a rede do DIVINATIO (via proxy /rpc). */
+// Metadados das redes conhecidas (nome amigável + explorador) por chainId.
+// No modo local a rede é o nó interno (chainId 31337); no modo public é a
+// Base Sepolia (84532). Outras redes caem no rótulo genérico.
+const CHAIN_META = {
+  84532: {
+    chainName: "Base Sepolia",
+    blockExplorerUrls: ["https://sepolia.basescan.org"],
+  },
+  31337: { chainName: "DIVINATIO Testnet" },
+};
+
+/** Adiciona/troca a MetaMask para a rede configurada (local: proxy /rpc; public: RPC real). */
 async function ensureNetwork() {
   const { publicRpcUrl, chainId } = await getConfig();
   if (!publicRpcUrl || !chainId) return;
@@ -45,14 +57,16 @@ async function ensureNetwork() {
     });
   } catch (err) {
     if (err.code === 4902 || /Unrecognized chain|not been added/i.test(err.message || "")) {
+      const meta = CHAIN_META[Number(chainId)] || { chainName: "DIVINATIO Testnet" };
       await window.ethereum.request({
         method: "wallet_addEthereumChain",
         params: [
           {
             chainId: hexChain,
-            chainName: "DIVINATIO Testnet",
+            chainName: meta.chainName,
             nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
             rpcUrls: [publicRpcUrl],
+            ...(meta.blockExplorerUrls ? { blockExplorerUrls: meta.blockExplorerUrls } : {}),
           },
         ],
       });
@@ -73,6 +87,10 @@ export async function connectWallet() {
 
 /** Pede ETH de gás (torneira do servidor) para o endereço conseguir transacionar. */
 async function requestGas(address) {
+  // No modo public não há torneira (/api/gas está desativada): o gás vem de um
+  // faucet externo da rede pública. Evita uma chamada inútil ao SPA.
+  const { chainMode } = await getConfig();
+  if (chainMode === "public") return;
   try {
     await fetch(`${API_URL}/api/gas?address=${address}`, { method: "POST" });
   } catch {

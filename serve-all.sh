@@ -9,6 +9,15 @@
 set -e
 cd "$(dirname "$0")"
 
+# CHAIN_MODE=public: a blockchain é EXTERNA e permanente (ex.: Base Sepolia).
+# Não subimos nó interno nem rodamos seed — apenas indexamos a cadeia externa
+# via RPC_URL/CONTRACT_ADDRESS/TOKEN_ADDRESS vindos do ambiente.
+if [ "${CHAIN_MODE:-local}" = "public" ]; then
+  echo "🌐 Modo PÚBLICO: indexando cadeia externa (RPC_URL=${RPC_URL:-?})."
+  exec node backend/server.js
+fi
+
+# --- Modo LOCAL (padrão): pilha completa num único processo ---
 echo "🔨 Compilando o contrato..."
 npx hardhat compile
 
