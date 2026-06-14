@@ -13,7 +13,7 @@ const STATE_LABELS = ["open", "proposed", "disputed", "resolved", "cancelled"];
  * executa copyPredict para os seguidores automaticamente.
  */
 class Indexer {
-  constructor(rpcUrl, contractAddress, pollMs = 5000) {
+  constructor(rpcUrl, contractAddress, pollMs = 5000, startBlock = 0) {
     this.provider = new ethers.JsonRpcProvider(rpcUrl);
     this.contract = new ethers.Contract(contractAddress, ABI, this.provider);
     this.pollMs = pollMs;
@@ -23,7 +23,9 @@ class Indexer {
     this.follows = new Map(); // follower => Set(prophet)
     this.copied = new Set(); // `${marketId}:${follower}`
     this.copyAttempted = new Set(); // evita reexecutar cópias que revertem
-    this.lastBlock = 0;
+    // Começa a indexar do bloco do deploy (startBlock). Em cadeias públicas
+    // (ex.: Base Sepolia) começar do bloco 0 leria milhões de blocos.
+    this.lastBlock = startBlock - 1;
     this.ready = false;
 
     if (process.env.KEEPER_PRIVATE_KEY) {
@@ -31,6 +33,19 @@ class Indexer {
       this.keeperContract = this.contract.connect(wallet);
       console.log("Keeper de copy-staking ativo:", wallet.address);
     }
+  }
+
+  // RPCs públicos (Base Sepolia) limitam eth_getLogs a ~2000 blocos por
+  // consulta. Fatia o intervalo em janelas seguras e junta os resultados.
+  async queryChunked(filter, from, to) {
+    const MAX = 1900;
+    let out = [];
+    for (let start = from; start <= to; start += MAX) {
+      const end = Math.min(start + MAX - 1, to);
+      const logs = await this.contract.queryFilter(filter, start, end);
+      if (logs.length) out = out.concat(logs);
+    }
+    return out;
   }
 
   async start() {
@@ -51,14 +66,14 @@ class Indexer {
   async _sync() {
     const latest = await this.provider.getBlockNumber();
 
-    // Eventos novos desde o último bloco sincronizado
-    const from = this.lastBlock + (this.lastBlock > 0 ? 1 : 0);
+    // Eventos novos desde o último bloco sincronizado (em janelas seguras)
+    const from = Math.max(0, this.lastBlock + 1);
     if (latest >= from) {
       const [predicted, followed, unfollowed, copied] = await Promise.all([
-        this.contract.queryFilter(this.contract.filters.Predicted(), from, latest),
-        this.contract.queryFilter(this.contract.filters.Followed(), from, latest),
-        this.contract.queryFilter(this.contract.filters.Unfollowed(), from, latest),
-        this.contract.queryFilter(this.contract.filters.Copied(), from, latest),
+        this.queryChunked(this.contract.filters.Predicted(), from, latest),
+        this.queryChunked(this.contract.filters.Followed(), from, latest),
+        this.queryChunked(this.contract.filters.Unfollowed(), from, latest),
+        this.queryChunked(this.contract.filters.Copied(), from, latest),
       ]);
       for (const ev of predicted) {
         const marketId = Number(ev.args.marketId);

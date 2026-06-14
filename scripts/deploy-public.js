@@ -42,6 +42,12 @@ async function main() {
   const address = await divinatio.getAddress();
   console.log("Divinatio implantado em:", address);
 
+  // bloco do deploy: o indexador começa daqui (não do bloco 0) na cadeia pública
+  const deployTx = divinatio.deploymentTransaction();
+  const startBlock = deployTx && deployTx.blockNumber != null
+    ? deployTx.blockNumber
+    : await ethers.provider.getBlockNumber();
+
   const now = (await ethers.provider.getBlock("latest")).timestamp;
   const DAY = 24 * 60 * 60;
 
@@ -80,6 +86,7 @@ async function main() {
   console.log("\nDeploy público concluído. Copie para as variáveis da Railway:");
   console.log(`CONTRACT_ADDRESS=${address}`);
   console.log(`TOKEN_ADDRESS=${tokenAddress}`);
+  console.log(`START_BLOCK=${startBlock}`);
 }
 
 main().catch((error) => {
