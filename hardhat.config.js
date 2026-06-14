@@ -26,7 +26,11 @@ if (process.env.USE_NATIVE_SOLC !== "1") {
   });
 }
 
-const accounts = process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [];
+// Normaliza a chave: aceita com ou sem o prefixo "0x" (a MetaMask exporta sem).
+const rawKey = process.env.PRIVATE_KEY;
+const accounts = rawKey
+  ? [rawKey.startsWith("0x") ? rawKey.trim() : "0x" + rawKey.trim()]
+  : [];
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
