@@ -8,6 +8,15 @@ const { mockApi } = require("./mock");
 // Modo vitrine: serve dados de demonstração sem blockchain (MOCK=1).
 const MOCK = process.env.MOCK === "1";
 
+// CHAIN_MODE controla onde a blockchain vive:
+//   "local"  (padrão) = nó interno do Hardhat + seed de demo; o backend expõe
+//                        a ponte /rpc e a torneira de gás /api/gas.
+//   "public"          = cadeia EXTERNA e permanente (ex.: Base Sepolia); o
+//                        backend apenas INDEXA via RPC_URL. SEM ponte /rpc e
+//                        SEM torneira de gás (gás vem de faucet externo).
+const CHAIN_MODE = process.env.CHAIN_MODE || "local";
+const PUBLIC = CHAIN_MODE === "public";
+
 const PORT = process.env.PORT || 3001;
 const RPC_URL = process.env.RPC_URL || "http://127.0.0.1:8545";
 // padrão = endereços determinísticos do scripts/seed.js na rede local do Hardhat
@@ -28,11 +37,14 @@ app.get("/api/health", (req, res) => {
   res.json({ ok: true, ready: MOCK ? true : indexer.ready, mock: MOCK, contract: CONTRACT_ADDRESS, token: TOKEN_ADDRESS });
 });
 
-const CHAIN_ID = Number(process.env.CHAIN_ID || 31337);
+// chainId padrão: 84532 (Base Sepolia) no modo public; 31337 (Hardhat) no local.
+const CHAIN_ID = Number(process.env.CHAIN_ID || (PUBLIC ? 84532 : 31337));
 
 // configuração que o frontend consome em runtime (evita rebuild por endereço).
-// publicRpcUrl = endereço público pelo qual a MetaMask fala com a blockchain
-// (passa pelo proxy /rpc deste servidor, já que a blockchain roda interna).
+// publicRpcUrl = endereço pelo qual a MetaMask fala com a blockchain:
+//   - local:  a ponte /rpc deste servidor (a blockchain roda interna);
+//   - public: o RPC público REAL (RPC_URL), para a MetaMask falar direto com
+//             a cadeia externa (ex.: https://sepolia.base.org).
 app.get("/api/config", (req, res) => {
   const host = req.get("x-forwarded-host") || req.get("host");
   const proto = req.get("x-forwarded-proto") || req.protocol;
@@ -40,15 +52,17 @@ app.get("/api/config", (req, res) => {
     contractAddress: CONTRACT_ADDRESS,
     tokenAddress: TOKEN_ADDRESS,
     rpcUrl: RPC_URL,
-    publicRpcUrl: `${proto}://${host}/rpc`,
+    publicRpcUrl: PUBLIC ? RPC_URL : `${proto}://${host}/rpc`,
     chainId: CHAIN_ID,
     mock: MOCK,
+    chainMode: CHAIN_MODE,
   });
 });
 
-// Ponte JSON-RPC: a MetaMask (no navegador do usuário) fala com a blockchain
-// que roda dentro deste servidor. Sem MOCK e sem blockchain, isto fica inativo.
-if (!MOCK) {
+// Ponte JSON-RPC e torneira de gás existem APENAS no modo local (sem MOCK).
+// No modo public, a MetaMask fala direto com o RPC público e o gás vem de
+// faucet externo — nossa torneira gastaria ETH de teste real do deployer.
+if (!MOCK && !PUBLIC) {
   app.post("/rpc", async (req, res) => {
     try {
       const upstream = await fetch(RPC_URL, {
@@ -131,7 +145,8 @@ function listen() {
     if (MOCK) {
       console.log("Modo VITRINE (dados de demonstração, sem blockchain).");
     } else {
-      console.log(`Contrato: ${CONTRACT_ADDRESS} | RPC: ${RPC_URL}`);
+      console.log(`Modo ${CHAIN_MODE.toUpperCase()} | Contrato: ${CONTRACT_ADDRESS} | RPC: ${RPC_URL} | chainId: ${CHAIN_ID}`);
+      if (PUBLIC) console.log("Ponte /rpc e torneira /api/gas DESATIVADAS (cadeia pública externa).");
     }
   });
 }
