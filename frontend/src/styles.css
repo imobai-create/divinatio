@@ -735,3 +735,60 @@ button {
   color: var(--text-dim);
   line-height: 1.7;
 }
+
+/* Gráfico de evolução das probabilidades (estilo Polymarket) */
+.chart-card {
+  margin-top: 28px;
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.chart-card h3 {
+  margin-bottom: 14px;
+}
+.chart-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.chart-axis-label {
+  fill: var(--text-dim);
+  font-size: 11px;
+  font-family: var(--font-body);
+}
+.chart-empty {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  padding: 24px 0;
+  text-align: center;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 14px;
+}
+.chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+.chart-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+}
+.chart-legend-label {
+  color: var(--text);
+}
+.chart-legend-pct {
+  color: var(--gold-soft);
+}

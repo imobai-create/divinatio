@@ -4,6 +4,7 @@ import { api } from "../api";
 import { predict, claim } from "../eth";
 import { CURRENCY, parseQuestion, fmtEth, shortAddr, PROTOCOL_FEE_BPS } from "../util";
 import { OddsList, StateBadge, Countdown } from "../components";
+import MarketChart from "../MarketChart";
 
 export default function MarketPage({ account, onConnect, notify }) {
   const { id } = useParams();
@@ -94,6 +95,8 @@ export default function MarketPage({ account, onConnect, notify }) {
           selected={market.state === "open" ? selected : undefined}
           onSelect={setSelected}
         />
+
+        <MarketChart marketId={market.id} labels={labels} />
 
         {market.predictions?.length > 0 && (
           <>

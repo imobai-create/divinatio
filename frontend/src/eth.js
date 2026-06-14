@@ -1,6 +1,7 @@
 import { BrowserProvider, Contract, MaxUint256, parseEther } from "ethers";
 import DIVINATIO_ABI from "./abi/DivinatioABI.json";
 import TOKEN_ABI from "./abi/MockStablecoinABI.json";
+import { getActiveProvider, hasAnyWallet } from "./wallet";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
 
@@ -31,7 +32,8 @@ export function getConfig() {
 }
 
 export function hasWallet() {
-  return typeof window !== "undefined" && Boolean(window.ethereum);
+  // carteira invisível da Privy OU MetaMask injetada
+  return hasAnyWallet();
 }
 
 // Metadados das redes conhecidas (nome amigável + explorador) por chainId.
@@ -45,44 +47,58 @@ const CHAIN_META = {
   31337: { chainName: "DIVINATIO Testnet" },
 };
 
-/** Adiciona/troca a MetaMask para a rede configurada (local: proxy /rpc; public: RPC real). */
+/** Garante que a carteira está na rede certa (carteira Privy já nasce na Base
+ *  Sepolia; para MetaMask, troca/adiciona). Tolerante a falhas. */
 async function ensureNetwork() {
+  const eip1193 = getActiveProvider();
+  if (!eip1193 || !eip1193.request) return;
   const { publicRpcUrl, chainId } = await getConfig();
   if (!publicRpcUrl || !chainId) return;
   const hexChain = "0x" + Number(chainId).toString(16);
   try {
-    await window.ethereum.request({
+    await eip1193.request({
       method: "wallet_switchEthereumChain",
       params: [{ chainId: hexChain }],
     });
   } catch (err) {
     if (err.code === 4902 || /Unrecognized chain|not been added/i.test(err.message || "")) {
       const meta = CHAIN_META[Number(chainId)] || { chainName: "DIVINATIO Testnet" };
-      await window.ethereum.request({
-        method: "wallet_addEthereumChain",
-        params: [
-          {
-            chainId: hexChain,
-            chainName: meta.chainName,
-            nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-            rpcUrls: [publicRpcUrl],
-            ...(meta.blockExplorerUrls ? { blockExplorerUrls: meta.blockExplorerUrls } : {}),
-          },
-        ],
-      });
+      try {
+        await eip1193.request({
+          method: "wallet_addEthereumChain",
+          params: [
+            {
+              chainId: hexChain,
+              chainName: meta.chainName,
+              nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+              rpcUrls: [publicRpcUrl],
+              ...(meta.blockExplorerUrls ? { blockExplorerUrls: meta.blockExplorerUrls } : {}),
+            },
+          ],
+        });
+      } catch {
+        /* segue assim mesmo */
+      }
     }
     // se o usuário recusar, segue assim mesmo (pode já estar na rede certa)
   }
 }
 
+/** Conecta via MetaMask injetada (caminho alternativo ao login Privy). */
 export async function connectWallet() {
-  if (!hasWallet()) {
-    throw new Error("Nenhuma carteira encontrada. Instale a MetaMask para apostar.");
+  const eip1193 = getActiveProvider();
+  if (!eip1193) {
+    throw new Error("Nenhuma carteira encontrada. Entre com e-mail ou instale a MetaMask.");
   }
-  const provider = new BrowserProvider(window.ethereum);
+  const provider = new BrowserProvider(eip1193);
   const accounts = await provider.send("eth_requestAccounts", []);
   await ensureNetwork();
   return accounts[0];
+}
+
+/** Chamado após login (Privy ou MetaMask) para alinhar a rede. */
+export async function prepareNetwork() {
+  await ensureNetwork();
 }
 
 /** Pede ETH de gás (torneira do servidor) para o endereço conseguir transacionar. */
@@ -100,7 +116,9 @@ async function requestGas(address) {
 
 async function contracts() {
   const { contractAddress, tokenAddress } = await getConfig();
-  const provider = new BrowserProvider(window.ethereum);
+  const eip1193 = getActiveProvider();
+  if (!eip1193) throw new Error("Carteira não conectada. Entre com e-mail ou MetaMask.");
+  const provider = new BrowserProvider(eip1193);
   const signer = await provider.getSigner();
   return {
     signer,

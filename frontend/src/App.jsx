@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Routes, Route } from "react-router-dom";
+import { usePrivy } from "@privy-io/react-auth";
 import { Navbar, Footer, ToastStack } from "./components";
-import { connectWallet, hasWallet, tokenBalance, faucet } from "./eth";
+import { connectWallet, tokenBalance, faucet, prepareNetwork } from "./eth";
+import { WalletBridge } from "./wallet";
 import { CURRENCY } from "./util";
 import Home from "./pages/Home";
 import MarketPage from "./pages/MarketPage";
@@ -9,6 +11,7 @@ import Leaderboard from "./pages/Leaderboard";
 import CreateMarket from "./pages/CreateMarket";
 
 export default function App() {
+  const { ready, authenticated, login, logout } = usePrivy();
   const [account, setAccount] = useState(null);
   const [balance, setBalance] = useState(null);
   const [toasts, setToasts] = useState([]);
@@ -28,16 +31,49 @@ export default function App() {
     }
   }, []);
 
+  // a WalletBridge avisa quando a carteira da Privy fica pronta / muda
+  const handleWalletChange = useCallback(
+    (addr) => {
+      setAccount(addr);
+      refreshBalance(addr);
+      if (addr) prepareNetwork().catch(() => {});
+    },
+    [refreshBalance]
+  );
+
   const onConnect = useCallback(async () => {
+    // Caminho principal: login da Privy (e-mail/Google/carteira). Se a Privy
+    // não estiver disponível, cai para a MetaMask injetada — assim o site nunca
+    // fica sem como conectar.
     try {
+      if (authenticated) return; // já logado; a WalletBridge cuida do account
+      if (ready) {
+        login();
+        return;
+      }
       const addr = await connectWallet();
       setAccount(addr);
       refreshBalance(addr);
-      notify("Carteira conectada ✨");
     } catch (e) {
-      notify(e.message, "error");
+      try {
+        const addr = await connectWallet();
+        setAccount(addr);
+        refreshBalance(addr);
+      } catch (e2) {
+        notify(e2.message || e.message || "Não foi possível conectar.", "error");
+      }
     }
-  }, [notify, refreshBalance]);
+  }, [ready, authenticated, login, notify, refreshBalance]);
+
+  const onLogout = useCallback(async () => {
+    try {
+      await logout();
+    } catch {
+      /* ignore */
+    }
+    setAccount(null);
+    setBalance(null);
+  }, [logout]);
 
   const onFaucet = useCallback(async () => {
     try {
@@ -49,20 +85,29 @@ export default function App() {
     }
   }, [account, notify, refreshBalance]);
 
+  // MetaMask injetada: reage à troca de conta (só quando NÃO está usando Privy)
   useEffect(() => {
-    if (!hasWallet()) return;
+    if (typeof window === "undefined" || !window.ethereum?.on) return;
     const handler = (accounts) => {
+      if (authenticated) return;
       const addr = accounts[0] || null;
       setAccount(addr);
       refreshBalance(addr);
     };
-    window.ethereum.on?.("accountsChanged", handler);
+    window.ethereum.on("accountsChanged", handler);
     return () => window.ethereum.removeListener?.("accountsChanged", handler);
-  }, [refreshBalance]);
+  }, [authenticated, refreshBalance]);
 
   return (
     <>
-      <Navbar account={account} balance={balance} onConnect={onConnect} onFaucet={onFaucet} />
+      <WalletBridge onChange={handleWalletChange} />
+      <Navbar
+        account={account}
+        balance={balance}
+        onConnect={onConnect}
+        onFaucet={onFaucet}
+        onLogout={account ? onLogout : null}
+      />
       <main>
         <Routes>
           <Route path="/" element={<Home />} />
