@@ -13,6 +13,23 @@ cd "$(dirname "$0")"
 # Não subimos nó interno nem rodamos seed — apenas indexamos a cadeia externa
 # via RPC_URL/CONTRACT_ADDRESS/TOKEN_ADDRESS vindos do ambiente.
 if [ "${CHAIN_MODE:-local}" = "public" ]; then
+  # Deploy ÚNICO pela própria Railway (sem terminal do usuário): se DEPLOY=1,
+  # houver PRIVATE_KEY e ainda NÃO houver CONTRACT_ADDRESS, implanta os
+  # contratos + mercados na cadeia pública, captura os endereços e segue.
+  # deploy-public.js é idempotente, então depois que o usuário fixar
+  # CONTRACT_ADDRESS/TOKEN_ADDRESS nas variáveis, reinícios NÃO reimplantam.
+  if [ "${DEPLOY:-}" = "1" ] && [ -n "${PRIVATE_KEY:-}" ] && [ -z "${CONTRACT_ADDRESS:-}" ]; then
+    NET="${DEPLOY_NETWORK:-baseSepolia}"
+    echo "🚀 Implantando contratos na cadeia pública ($NET) — uma vez..."
+    npx hardhat run scripts/deploy-public.js --network "$NET" | tee /tmp/divinatio-deploy.txt
+    export CONTRACT_ADDRESS=$(grep '^CONTRACT_ADDRESS=' /tmp/divinatio-deploy.txt | tail -1 | cut -d= -f2 | tr -d '\r')
+    export TOKEN_ADDRESS=$(grep '^TOKEN_ADDRESS=' /tmp/divinatio-deploy.txt | tail -1 | cut -d= -f2 | tr -d '\r')
+    echo "════════════════════════════════════════════════════════════"
+    echo "⚠️  COPIE estes para as VARIÁVEIS da Railway e remova DEPLOY=1:"
+    echo "    CONTRACT_ADDRESS=$CONTRACT_ADDRESS"
+    echo "    TOKEN_ADDRESS=$TOKEN_ADDRESS"
+    echo "════════════════════════════════════════════════════════════"
+  fi
   echo "🌐 Modo PÚBLICO: indexando cadeia externa (RPC_URL=${RPC_URL:-?})."
   exec node backend/server.js
 fi
