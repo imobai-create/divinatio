@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { CURRENCY, STATE_PT, parseQuestion, poolShares, impliedMultipliers, fmtEth, timeLeft } from "./util";
 
-export function Navbar({ account, balance, onConnect, onFaucet }) {
+export function Navbar({ account, balance, onConnect, onFaucet, onLogout }) {
   return (
     <nav className="navbar">
       <div className="container navbar-inner">
@@ -19,9 +19,19 @@ export function Navbar({ account, balance, onConnect, onFaucet }) {
             🚰 {balance !== null ? `${fmtEth(balance, 0)} ${CURRENCY}` : "…"}
           </button>
         )}
-        <button className="btn btn-wallet" onClick={onConnect}>
-          {account ? `🜂 ${account.slice(0, 6)}…${account.slice(-4)}` : "Conectar carteira"}
-        </button>
+        {account ? (
+          <button
+            className="btn btn-wallet"
+            onClick={onLogout}
+            title="Sair"
+          >
+            🜂 {account.slice(0, 6)}…{account.slice(-4)} · sair
+          </button>
+        ) : (
+          <button className="btn btn-gold btn-wallet" onClick={onConnect}>
+            Entrar
+          </button>
+        )}
       </div>
     </nav>
   );
