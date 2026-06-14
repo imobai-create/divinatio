@@ -77,11 +77,41 @@ const LEADERBOARD = [
   { address: "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65", predictions: 2, hits: 0, volume: eth(170), accuracyBps: 0, followers: 0 },
 ];
 
+// Histórico fake de probabilidades: parte de uma distribuição uniforme e
+// converge suavemente para os pools atuais do mercado, gerando uma curva
+// plausível ao longo dos últimos dias.
+function buildHistory(market) {
+  if (!market) return [];
+  const n = market.outcomeCount;
+  const pools = market.pools.map((p) => Number(BigInt(p) / 10n ** 12n)); // ~milésimos
+  const total = pools.reduce((a, b) => a + b, 0) || 1;
+  const target = pools.map((p) => (p / total) * 100);
+  const even = 100 / n;
+  const STEPS = 8;
+  const t0 = now() - 12 * DAY;
+  const points = [];
+  for (let s = 0; s <= STEPS; s++) {
+    const k = s / STEPS;
+    // interpola do uniforme ao alvo, com um leve ruído determinístico
+    const raw = target.map((tg, i) => {
+      const wobble = Math.sin((s + i) * 1.3) * 4 * (1 - k);
+      return even + (tg - even) * k + wobble;
+    });
+    // normaliza para somar 100 e evitar negativos
+    const clamped = raw.map((v) => Math.max(0.5, v));
+    const sum = clamped.reduce((a, b) => a + b, 0);
+    const probs = clamped.map((v) => Math.round((v / sum) * 10000) / 100);
+    points.push({ t: t0 + Math.round((k * 12 * DAY)), probs });
+  }
+  return points;
+}
+
 function mockApi() {
   const markets = buildMarkets();
   return {
     markets: () => markets.map(({ predictions, ...m }) => m),
     market: (id) => markets.find((m) => m.id === id) || null,
+    history: (id) => buildHistory(markets.find((m) => m.id === id)),
     leaderboard: () => LEADERBOARD,
     stats: () => ({
       markets: markets.length,

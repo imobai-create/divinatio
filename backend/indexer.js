@@ -18,7 +18,8 @@ class Indexer {
     this.contract = new ethers.Contract(contractAddress, ABI, this.provider);
     this.pollMs = pollMs;
     this.markets = [];
-    this.predictionsByMarket = new Map(); // marketId => [{diviner, outcome, amount, txHash}]
+    this.predictionsByMarket = new Map(); // marketId => [{diviner, outcome, amount, txHash, timestamp}]
+    this.blockTimestamps = new Map(); // blockNumber => unixSeconds (cache)
     this.diviners = new Map(); // address => stats
     this.follows = new Map(); // follower => Set(prophet)
     this.copied = new Set(); // `${marketId}:${follower}`
@@ -46,6 +47,18 @@ class Indexer {
       if (logs.length) out = out.concat(logs);
     }
     return out;
+  }
+
+  // Timestamp (unix em segundos) de um bloco, com cache para não repetir
+  // chamadas RPC para o mesmo bloco.
+  async blockTimestamp(blockNumber) {
+    if (this.blockTimestamps.has(blockNumber)) {
+      return this.blockTimestamps.get(blockNumber);
+    }
+    const block = await this.provider.getBlock(blockNumber);
+    const ts = block ? Number(block.timestamp) : Math.floor(Date.now() / 1000);
+    this.blockTimestamps.set(blockNumber, ts);
+    return ts;
   }
 
   async start() {
@@ -80,11 +93,13 @@ class Indexer {
         if (!this.predictionsByMarket.has(marketId)) {
           this.predictionsByMarket.set(marketId, []);
         }
+        const timestamp = await this.blockTimestamp(ev.blockNumber);
         this.predictionsByMarket.get(marketId).push({
           diviner: ev.args.diviner,
           outcome: Number(ev.args.outcome),
           amount: ev.args.amount.toString(),
           txHash: ev.transactionHash,
+          timestamp,
         });
       }
       for (const ev of followed) {
@@ -191,6 +206,43 @@ class Indexer {
       ...market,
       predictions: (this.predictionsByMarket.get(id) || []).slice(-50).reverse(),
     };
+  }
+
+  /**
+   * Série temporal das probabilidades implícitas de cada desfecho. Parte de
+   * pools zerados e, aplicando cada aposta em ordem cronológica, calcula a
+   * probabilidade implícita = pool_do_desfecho / pool_total (em %).
+   * Retorna [{ t: <unixSeconds>, probs: [p0, p1, ...] }, ...]. Sem apostas: [].
+   */
+  getMarketHistory(id) {
+    const market = this.markets.find((m) => m.id === id);
+    const preds = (this.predictionsByMarket.get(id) || [])
+      .filter((p) => Number.isFinite(p.timestamp))
+      .slice()
+      .sort((a, b) => a.timestamp - b.timestamp);
+    if (!preds.length) return [];
+
+    const n = market ? market.outcomeCount : Math.max(...preds.map((p) => p.outcome)) + 1;
+    const pools = new Array(n).fill(0n);
+    const series = [];
+
+    // Ponto inicial: tudo zerado => probabilidades uniformes, no instante da
+    // primeira aposta (para a linha começar a partir do início real).
+    const even = Math.round((100 / n) * 100) / 100;
+    series.push({ t: preds[0].timestamp, probs: pools.map(() => even) });
+
+    for (const p of preds) {
+      const idx = p.outcome;
+      if (idx < 0 || idx >= n) continue;
+      pools[idx] += BigInt(p.amount);
+      const total = pools.reduce((acc, q) => acc + q, 0n);
+      const probs =
+        total === 0n
+          ? pools.map(() => even)
+          : pools.map((q) => Number((q * 10000n) / total) / 100);
+      series.push({ t: p.timestamp, probs });
+    }
+    return series;
   }
 
   getLeaderboard() {

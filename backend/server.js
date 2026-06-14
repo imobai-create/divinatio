@@ -125,6 +125,11 @@ app.get("/api/markets/:id", (req, res) => {
   res.json(market);
 });
 
+app.get("/api/markets/:id/history", (req, res) => {
+  const id = Number(req.params.id);
+  res.json(MOCK ? source.history(id) : indexer.getMarketHistory(id));
+});
+
 app.get("/api/leaderboard", (req, res) => {
   res.json(MOCK ? source.leaderboard() : indexer.getLeaderboard());
 });
