@@ -31,7 +31,9 @@ app.use(express.json());
 
 // No modo vitrine, a fonte de dados é o mock; senão, o indexador on-chain.
 const source = MOCK ? mockApi() : null;
-const indexer = MOCK ? null : new Indexer(RPC_URL, CONTRACT_ADDRESS);
+// START_BLOCK = bloco do deploy (evita varrer milhões de blocos numa cadeia pública).
+const START_BLOCK = Number(process.env.START_BLOCK || 0);
+const indexer = MOCK ? null : new Indexer(RPC_URL, CONTRACT_ADDRESS, undefined, START_BLOCK);
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, ready: MOCK ? true : indexer.ready, mock: MOCK, contract: CONTRACT_ADDRESS, token: TOKEN_ADDRESS });

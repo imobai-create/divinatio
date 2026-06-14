@@ -24,10 +24,12 @@ if [ "${CHAIN_MODE:-local}" = "public" ]; then
     npx hardhat run scripts/deploy-public.js --network "$NET" | tee /tmp/divinatio-deploy.txt
     export CONTRACT_ADDRESS=$(grep '^CONTRACT_ADDRESS=' /tmp/divinatio-deploy.txt | tail -1 | cut -d= -f2 | tr -d '\r')
     export TOKEN_ADDRESS=$(grep '^TOKEN_ADDRESS=' /tmp/divinatio-deploy.txt | tail -1 | cut -d= -f2 | tr -d '\r')
+    export START_BLOCK=$(grep '^START_BLOCK=' /tmp/divinatio-deploy.txt | tail -1 | cut -d= -f2 | tr -d '\r')
     echo "════════════════════════════════════════════════════════════"
-    echo "⚠️  COPIE estes para as VARIÁVEIS da Railway e remova DEPLOY=1:"
+    echo "⚠️  COPIE estes 3 para as VARIÁVEIS da Railway e remova DEPLOY=1:"
     echo "    CONTRACT_ADDRESS=$CONTRACT_ADDRESS"
     echo "    TOKEN_ADDRESS=$TOKEN_ADDRESS"
+    echo "    START_BLOCK=$START_BLOCK"
     echo "════════════════════════════════════════════════════════════"
   fi
   echo "🌐 Modo PÚBLICO: indexando cadeia externa (RPC_URL=${RPC_URL:-?})."
