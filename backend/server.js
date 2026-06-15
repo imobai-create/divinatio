@@ -61,9 +61,7 @@ app.get("/api/config", (req, res) => {
   });
 });
 
-// Ponte JSON-RPC e torneira de gás existem APENAS no modo local (sem MOCK).
-// No modo public, a MetaMask fala direto com o RPC público e o gás vem de
-// faucet externo — nossa torneira gastaria ETH de teste real do deployer.
+// Ponte JSON-RPC: só no modo local (no público a carteira fala direto com o RPC).
 if (!MOCK && !PUBLIC) {
   app.post("/rpc", async (req, res) => {
     try {
@@ -78,18 +76,31 @@ if (!MOCK && !PUBLIC) {
       res.status(502).json({ error: "rpc proxy indisponível", detail: e.message });
     }
   });
+}
 
-  // Torneira de gás: envia um pouco de ETH de teste para o endereço informado,
-  // para que visitantes consigam pagar o gás das transações (apostar etc.).
-  // Conta pagadora = conta #0 da rede de teste do Hardhat (chave pública e
-  // conhecida; só vale nesta rede de teste, sem valor real).
+// Torneira de gás: a carteira invisível (Privy) nasce SEM ETH, então não
+// consegue pagar o gás das transações (faucet de dUSD, apostar...). Aqui o
+// servidor envia um pouquinho de ETH de teste para o endereço.
+//   - local:  paga com a conta de teste do Hardhat (chave conhecida);
+//   - public: exige GAS_FAUCET_KEY = chave de uma carteira COM ETH de teste da
+//             Base Sepolia (ex.: a carteira de deploy, reabastecida no faucet).
+if (!MOCK) {
   const { ethers } = require("ethers");
-  const GAS_FAUCET_KEY =
-    process.env.GAS_FAUCET_KEY ||
+  const DEFAULT_LOCAL_KEY =
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-  const gasGiven = new Map(); // address -> timestamp (limite simples por endereço)
+  let rawKey = process.env.GAS_FAUCET_KEY || (PUBLIC ? "" : DEFAULT_LOCAL_KEY);
+  if (rawKey && !rawKey.startsWith("0x")) rawKey = "0x" + rawKey;
+  const GAS_FAUCET_KEY = rawKey;
+  // valores conforme a rede: na Base Sepolia o gás é baratíssimo
+  const GIVE = PUBLIC ? ethers.parseEther("0.0005") : ethers.parseEther("1");
+  const MIN = PUBLIC ? ethers.parseEther("0.0002") : ethers.parseEther("0.5");
+  const gasGiven = new Map(); // address -> timestamp (limite por endereço)
+
   app.post("/api/gas", async (req, res) => {
     try {
+      if (!GAS_FAUCET_KEY) {
+        return res.json({ ok: false, reason: "torneira de gás não configurada (defina GAS_FAUCET_KEY)" });
+      }
       const address = String(req.query.address || req.body.address || "");
       if (!ethers.isAddress(address)) {
         return res.status(400).json({ error: "endereço inválido" });
@@ -101,8 +112,8 @@ if (!MOCK && !PUBLIC) {
       const provider = new ethers.JsonRpcProvider(RPC_URL);
       const wallet = new ethers.Wallet(GAS_FAUCET_KEY, provider);
       const balance = await provider.getBalance(address);
-      if (balance < ethers.parseEther("0.5")) {
-        const tx = await wallet.sendTransaction({ to: address, value: ethers.parseEther("1") });
+      if (balance < MIN) {
+        const tx = await wallet.sendTransaction({ to: address, value: GIVE });
         await tx.wait();
         gasGiven.set(address.toLowerCase(), Date.now());
       }
