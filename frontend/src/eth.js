@@ -102,15 +102,12 @@ export async function prepareNetwork() {
 }
 
 /** Pede ETH de gás (torneira do servidor) para o endereço conseguir transacionar. */
-async function requestGas(address) {
-  // No modo public não há torneira (/api/gas está desativada): o gás vem de um
-  // faucet externo da rede pública. Evita uma chamada inútil ao SPA.
-  const { chainMode } = await getConfig();
-  if (chainMode === "public") return;
+export async function requestGas(address) {
+  if (!address) return;
   try {
     await fetch(`${API_URL}/api/gas?address=${address}`, { method: "POST" });
   } catch {
-    // sem torneira (ex.: modo local puro) — segue; o usuário pode já ter gás
+    // sem torneira configurada — segue; o usuário pode já ter gás
   }
 }
 

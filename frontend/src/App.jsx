@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Routes, Route } from "react-router-dom";
 import { usePrivy } from "@privy-io/react-auth";
 import { Navbar, Footer, ToastStack } from "./components";
-import { connectWallet, tokenBalance, faucet, prepareNetwork } from "./eth";
+import { connectWallet, tokenBalance, faucet, prepareNetwork, requestGas } from "./eth";
 import { WalletBridge } from "./wallet";
 import { CURRENCY } from "./util";
 import Home from "./pages/Home";
@@ -36,7 +36,11 @@ export default function App() {
     (addr) => {
       setAccount(addr);
       refreshBalance(addr);
-      if (addr) prepareNetwork().catch(() => {});
+      if (addr) {
+        prepareNetwork().catch(() => {});
+        // carteira nova nasce sem gás: já pede um pouco para conseguir transacionar
+        requestGas(addr).catch(() => {});
+      }
     },
     [refreshBalance]
   );
