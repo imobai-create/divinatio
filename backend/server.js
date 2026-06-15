@@ -91,9 +91,11 @@ if (!MOCK) {
   let rawKey = process.env.GAS_FAUCET_KEY || (PUBLIC ? "" : DEFAULT_LOCAL_KEY);
   if (rawKey && !rawKey.startsWith("0x")) rawKey = "0x" + rawKey;
   const GAS_FAUCET_KEY = rawKey;
-  // valores conforme a rede: na Base Sepolia o gás é baratíssimo
-  const GIVE = PUBLIC ? ethers.parseEther("0.0005") : ethers.parseEther("1");
-  const MIN = PUBLIC ? ethers.parseEther("0.0002") : ethers.parseEther("0.5");
+  // valores conforme a rede: na Base Sepolia o gás é baratíssimo, então um
+  // pouquinho dá para dezenas de transações. Mantido baixo para o "tanque"
+  // (GAS_FAUCET_KEY) durar e funcionar mesmo com saldo pequeno.
+  const GIVE = PUBLIC ? ethers.parseEther("0.00005") : ethers.parseEther("1");
+  const MIN = PUBLIC ? ethers.parseEther("0.00002") : ethers.parseEther("0.5");
   const gasGiven = new Map(); // address -> timestamp (limite por endereço)
 
   app.post("/api/gas", async (req, res) => {
