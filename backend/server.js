@@ -172,11 +172,14 @@ function listen() {
 if (MOCK) {
   listen();
 } else {
+  // Inicia o servidor IMEDIATAMENTE para que o healthcheck passe.
+  // O indexador sincroniza em segundo plano; /api/health reporta ready=false
+  // até a primeira sync completar. Se a sync inicial falhar, o setInterval
+  // dentro de indexer.start() continua tentando automaticamente.
+  listen();
   indexer
     .start()
-    .then(listen)
     .catch((error) => {
-      console.error("Falha ao iniciar o indexador:", error.message);
-      process.exit(1);
+      console.error("Falha ao iniciar o indexador (tentará novamente):", error.message);
     });
 }
