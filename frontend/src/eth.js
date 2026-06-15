@@ -1,7 +1,8 @@
-import { BrowserProvider, Contract, MaxUint256, parseEther } from "ethers";
+import { BrowserProvider, Contract, MaxUint256 } from "ethers";
 import DIVINATIO_ABI from "./abi/DivinatioABI.json";
 import TOKEN_ABI from "./abi/MockStablecoinABI.json";
 import { getActiveProvider, hasAnyWallet } from "./wallet";
+import { setDecimals, setCurrency, toUnits } from "./util";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
 
@@ -13,20 +14,31 @@ export function getConfig() {
     configPromise = fetch(`${API_URL}/api/config`)
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .catch(() => ({}))
-      .then((cfg) => ({
-        contractAddress:
-          cfg.contractAddress ||
-          import.meta.env.VITE_CONTRACT_ADDRESS ||
-          "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-        tokenAddress:
-          cfg.tokenAddress ||
-          import.meta.env.VITE_TOKEN_ADDRESS ||
-          "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-        publicRpcUrl: cfg.publicRpcUrl || null,
-        chainId: cfg.chainId || 31337,
-        mock: cfg.mock || false,
-        chainMode: cfg.chainMode || "local",
-      }));
+      .then((cfg) => {
+        // Decimais e símbolo do token vêm do backend (que lê decimals()/symbol()
+        // do token on-chain). Aplica-os no módulo util para que TODA formatação
+        // e conversão de valor use o número certo (USDC=6, dUSD=18).
+        const tokenDecimals = cfg.tokenDecimals != null ? Number(cfg.tokenDecimals) : 18;
+        const currencySymbol = cfg.currencySymbol || "dUSD";
+        setDecimals(tokenDecimals);
+        setCurrency(currencySymbol);
+        return {
+          contractAddress:
+            cfg.contractAddress ||
+            import.meta.env.VITE_CONTRACT_ADDRESS ||
+            "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+          tokenAddress:
+            cfg.tokenAddress ||
+            import.meta.env.VITE_TOKEN_ADDRESS ||
+            "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+          publicRpcUrl: cfg.publicRpcUrl || null,
+          chainId: cfg.chainId || 31337,
+          mock: cfg.mock || false,
+          chainMode: cfg.chainMode || "local",
+          tokenDecimals,
+          currencySymbol,
+        };
+      });
   }
   return configPromise;
 }
@@ -40,6 +52,10 @@ export function hasWallet() {
 // No modo local a rede é o nó interno (chainId 31337); no modo public é a
 // Base Sepolia (84532). Outras redes caem no rótulo genérico.
 const CHAIN_META = {
+  8453: {
+    chainName: "Base",
+    blockExplorerUrls: ["https://basescan.org"],
+  },
   84532: {
     chainName: "Base Sepolia",
     blockExplorerUrls: ["https://sepolia.basescan.org"],
@@ -149,7 +165,8 @@ export async function faucet() {
 }
 
 export async function predict(marketId, outcome, amount) {
-  const amountWei = parseEther(String(amount));
+  await getConfig(); // garante que os decimais do token estão carregados
+  const amountWei = toUnits(amount);
   await ensureAllowance(amountWei);
   const { divinatio } = await contracts();
   const tx = await divinatio.predict(marketId, outcome, amountWei);
@@ -175,7 +192,8 @@ export async function claim(marketId) {
 }
 
 export async function follow(prophet, amountPerMarket) {
-  const amountWei = parseEther(String(amountPerMarket));
+  await getConfig(); // garante que os decimais do token estão carregados
+  const amountWei = toUnits(amountPerMarket);
   await ensureAllowance(amountWei);
   const { divinatio } = await contracts();
   const tx = await divinatio.follow(prophet, amountWei);

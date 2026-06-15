@@ -52,6 +52,10 @@ const CHAIN_ID = Number(process.env.CHAIN_ID || (PUBLIC ? 84532 : 31337));
 app.get("/api/config", (req, res) => {
   const host = req.get("x-forwarded-host") || req.get("host");
   const proto = req.get("x-forwarded-proto") || req.protocol;
+  // Decimais e símbolo do token: vêm do indexador (que lê decimals()/symbol()
+  // do token on-chain). USDC = 6 decimais; dUSD de teste = 18. Default seguro
+  // 18/dUSD enquanto a leitura não completou ou no modo vitrine.
+  const tokenMeta = indexer ? indexer.getTokenMeta() : { tokenDecimals: 18, currencySymbol: "dUSD" };
   res.json({
     contractAddress: CONTRACT_ADDRESS,
     tokenAddress: TOKEN_ADDRESS,
@@ -60,6 +64,8 @@ app.get("/api/config", (req, res) => {
     chainId: CHAIN_ID,
     mock: MOCK,
     chainMode: CHAIN_MODE,
+    tokenDecimals: tokenMeta.tokenDecimals,
+    currencySymbol: tokenMeta.currencySymbol,
   });
 });
 

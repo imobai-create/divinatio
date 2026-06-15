@@ -1,7 +1,28 @@
-import { formatEther } from "ethers";
+import { formatUnits, parseUnits } from "ethers";
 
 export const PROTOCOL_FEE_BPS = 200;
-export const CURRENCY = "dUSD";
+
+// Decimais e símbolo do token são definidos em runtime a partir do /api/config
+// (ver eth.js getConfig). USDC tem 6 decimais; o dUSD de teste tem 18. Ficam
+// num módulo para que TODA formatação de valor use o número certo.
+let DECIMALS = 18;
+export let CURRENCY = "dUSD";
+
+export function setDecimals(d) {
+  const n = Number(d);
+  if (Number.isFinite(n) && n >= 0 && n <= 36) DECIMALS = n;
+}
+export function getDecimals() {
+  return DECIMALS;
+}
+export function setCurrency(s) {
+  if (s) CURRENCY = s;
+}
+
+/** Converte um valor humano (ex.: "10") para unidades cruas do token. */
+export function toUnits(amount) {
+  return parseUnits(String(amount), DECIMALS);
+}
 
 export const STATE_PT = {
   open: "Aberto",
@@ -23,7 +44,7 @@ export function parseQuestion(raw, outcomeCount) {
 }
 
 export function fmtEth(wei, digits = 3) {
-  const value = Number(formatEther(BigInt(wei)));
+  const value = Number(formatUnits(BigInt(wei), DECIMALS));
   return value.toLocaleString("pt-BR", { maximumFractionDigits: digits });
 }
 
