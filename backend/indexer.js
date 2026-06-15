@@ -83,43 +83,8 @@ class Indexer {
   async _sync() {
     const latest = await this.provider.getBlockNumber();
 
-    // Eventos novos desde o último bloco sincronizado (em janelas seguras)
-    const from = Math.max(0, this.lastBlock + 1);
-    if (latest >= from) {
-      const [predicted, followed, unfollowed, copied] = await Promise.all([
-        this.queryChunked(this.contract.filters.Predicted(), from, latest),
-        this.queryChunked(this.contract.filters.Followed(), from, latest),
-        this.queryChunked(this.contract.filters.Unfollowed(), from, latest),
-        this.queryChunked(this.contract.filters.Copied(), from, latest),
-      ]);
-      for (const ev of predicted) {
-        const marketId = Number(ev.args.marketId);
-        if (!this.predictionsByMarket.has(marketId)) {
-          this.predictionsByMarket.set(marketId, []);
-        }
-        const timestamp = await this.blockTimestamp(ev.blockNumber);
-        this.predictionsByMarket.get(marketId).push({
-          diviner: ev.args.diviner,
-          outcome: Number(ev.args.outcome),
-          amount: ev.args.amount.toString(),
-          txHash: ev.transactionHash,
-          timestamp,
-        });
-      }
-      for (const ev of followed) {
-        if (!this.follows.has(ev.args.follower)) this.follows.set(ev.args.follower, new Set());
-        this.follows.get(ev.args.follower).add(ev.args.prophet);
-      }
-      for (const ev of unfollowed) {
-        this.follows.get(ev.args.follower)?.delete(ev.args.prophet);
-      }
-      for (const ev of copied) {
-        this.copied.add(`${Number(ev.args.marketId)}:${ev.args.follower}`);
-      }
-      this.lastBlock = latest;
-    }
-
-    // Estado atual de todos os mercados
+    // 1) MERCADOS PRIMEIRO (leitura de estado: marketCount/getMarket). Carrega
+    // sempre, mesmo que a leitura de EVENTOS abaixo falhe no RPC público.
     const count = Number(await this.contract.marketCount());
     const markets = [];
     for (let id = 0; id < count; id++) {
@@ -141,30 +106,82 @@ class Indexer {
       });
     }
     this.markets = markets;
-
-    // Reputação dos profetas (endereços vistos nos eventos)
-    const addresses = new Set();
-    for (const preds of this.predictionsByMarket.values()) {
-      for (const p of preds) addresses.add(p.diviner);
-    }
-    const diviners = new Map();
-    for (const addr of addresses) {
-      const s = await this.contract.diviners(addr);
-      const accuracy = await this.contract.accuracyBps(addr);
-      const followers = [...this.follows.entries()].filter(([, set]) => set.has(addr)).length;
-      diviners.set(addr, {
-        address: addr,
-        predictions: Number(s.predictions),
-        hits: Number(s.hits),
-        volume: s.volume.toString(),
-        accuracyBps: Number(accuracy),
-        followers,
-      });
-    }
-    this.diviners = diviners;
     this.ready = true;
 
-    if (this.keeperContract) await this.runKeeper();
+    // 2) EVENTOS (apostas/follows) e reputação — RESILIENTE: se o RPC público
+    // falhar aqui (rate limit, etc.), os mercados continuam carregados e
+    // tenta-se de novo no próximo ciclo.
+    try {
+      const from = Math.max(0, this.lastBlock + 1);
+      if (latest >= from) {
+        const [predicted, followed, unfollowed, copied] = await Promise.all([
+          this.queryChunked(this.contract.filters.Predicted(), from, latest),
+          this.queryChunked(this.contract.filters.Followed(), from, latest),
+          this.queryChunked(this.contract.filters.Unfollowed(), from, latest),
+          this.queryChunked(this.contract.filters.Copied(), from, latest),
+        ]);
+        for (const ev of predicted) {
+          const marketId = Number(ev.args.marketId);
+          if (!this.predictionsByMarket.has(marketId)) {
+            this.predictionsByMarket.set(marketId, []);
+          }
+          const timestamp = await this.blockTimestamp(ev.blockNumber);
+          this.predictionsByMarket.get(marketId).push({
+            diviner: ev.args.diviner,
+            outcome: Number(ev.args.outcome),
+            amount: ev.args.amount.toString(),
+            txHash: ev.transactionHash,
+            timestamp,
+          });
+        }
+        for (const ev of followed) {
+          if (!this.follows.has(ev.args.follower)) this.follows.set(ev.args.follower, new Set());
+          this.follows.get(ev.args.follower).add(ev.args.prophet);
+        }
+        for (const ev of unfollowed) {
+          this.follows.get(ev.args.follower)?.delete(ev.args.prophet);
+        }
+        for (const ev of copied) {
+          this.copied.add(`${Number(ev.args.marketId)}:${ev.args.follower}`);
+        }
+        this.lastBlock = latest;
+        // reflete as apostas recém-lidas na contagem dos mercados já carregados
+        for (const mk of this.markets) {
+          mk.predictionCount = (this.predictionsByMarket.get(mk.id) || []).length;
+        }
+      }
+
+      // Reputação dos profetas (endereços vistos nos eventos)
+      const addresses = new Set();
+      for (const preds of this.predictionsByMarket.values()) {
+        for (const p of preds) addresses.add(p.diviner);
+      }
+      const diviners = new Map();
+      for (const addr of addresses) {
+        const s = await this.contract.diviners(addr);
+        const accuracy = await this.contract.accuracyBps(addr);
+        const followers = [...this.follows.entries()].filter(([, set]) => set.has(addr)).length;
+        diviners.set(addr, {
+          address: addr,
+          predictions: Number(s.predictions),
+          hits: Number(s.hits),
+          volume: s.volume.toString(),
+          accuracyBps: Number(accuracy),
+          followers,
+        });
+      }
+      this.diviners = diviners;
+    } catch (e) {
+      console.error("sync de eventos falhou (mercados ok, tenta de novo):", e.message);
+    }
+
+    if (this.keeperContract) {
+      try {
+        await this.runKeeper();
+      } catch (e) {
+        console.error("keeper:", e.message);
+      }
+    }
   }
 
   /** Executa cópias pendentes de copy-staking para mercados abertos. */
