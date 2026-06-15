@@ -62,7 +62,11 @@ class Indexer {
   }
 
   async start() {
-    await this.sync();
+    try {
+      await this.sync();
+    } catch (e) {
+      console.error("Sync inicial falhou (tentará novamente):", e.message);
+    }
     setInterval(() => this.sync().catch((e) => console.error("sync:", e.message)), this.pollMs);
   }
 

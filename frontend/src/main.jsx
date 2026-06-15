@@ -15,7 +15,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <PrivyProvider
       appId={PRIVY_APP_ID}
       config={{
-        loginMethods: ["email", "google"],
+        loginMethods: ["email", "google", "wallet"],
         embeddedWallets: { createOnLogin: "users-without-wallets" },
         defaultChain: baseSepolia,
         supportedChains: [baseSepolia],
