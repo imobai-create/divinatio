@@ -10,8 +10,16 @@ const { ethers } = require("hardhat");
 //   - é idempotente: se CONTRACT_ADDRESS e TOKEN_ADDRESS já vierem no ambiente,
 //     NÃO reimplanta (apenas informa que já existe).
 //
-// Uso:
+// Uso (TESTNET, implanta o dUSD de 18 decimais):
 //   PRIVATE_KEY=0x... USE_LOCAL_SOLC=1 npx hardhat run scripts/deploy-public.js --network baseSepolia
+//
+// Uso (MAINNET, usa um token JÁ EXISTENTE — ex.: USDC real, 6 decimais):
+//   Defina TOKEN_ADDRESS para NÃO implantar o dUSD e usar o token existente.
+//   O resolutionBond é calculado nos decimais REAIS desse token.
+//   USDC na Base mainnet: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 (6 decimais)
+//     PRIVATE_KEY=0x... TOKEN_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 \
+//     RESOLUTION_BOND=10 USE_LOCAL_SOLC=1 \
+//     npx hardhat run scripts/deploy-public.js --network base
 async function main() {
   // Idempotência: já implantado? Só informa e sai.
   if (process.env.CONTRACT_ADDRESS && process.env.TOKEN_ADDRESS) {
@@ -26,15 +34,37 @@ async function main() {
   console.log("Deployer:", deployer.address);
   console.log("Rede:", net.name || "?", "chainId:", Number(net.chainId));
 
-  // 1) stablecoin de teste (dUSD, com faucet público)
-  const MockStablecoin = await ethers.getContractFactory("MockStablecoin");
-  const token = await MockStablecoin.deploy();
-  await token.waitForDeployment();
-  const tokenAddress = await token.getAddress();
-  console.log("MockStablecoin (dUSD) implantado em:", tokenAddress);
+  // 1) Token do protocolo.
+  //   - Se TOKEN_ADDRESS estiver definido (ex.: USDC real na mainnet), usamos o
+  //     token EXISTENTE e NÃO implantamos o dUSD de teste.
+  //   - Caso contrário (testnet), implantamos o MockStablecoin (dUSD, 18 dec,
+  //     com faucet público).
+  let tokenAddress;
+  let tokenDecimals;
+  if (process.env.TOKEN_ADDRESS) {
+    tokenAddress = process.env.TOKEN_ADDRESS;
+    // lê os decimais REAIS do token (USDC = 6) para dimensionar o bond
+    const erc20 = new ethers.Contract(
+      tokenAddress,
+      ["function decimals() view returns (uint8)", "function symbol() view returns (string)"],
+      ethers.provider
+    );
+    tokenDecimals = Number(await erc20.decimals());
+    let sym = "?";
+    try { sym = await erc20.symbol(); } catch { /* alguns tokens não expõem symbol */ }
+    console.log(`Usando token EXISTENTE: ${tokenAddress} (symbol=${sym}, decimais=${tokenDecimals})`);
+  } else {
+    const MockStablecoin = await ethers.getContractFactory("MockStablecoin");
+    const token = await MockStablecoin.deploy();
+    await token.waitForDeployment();
+    tokenAddress = await token.getAddress();
+    tokenDecimals = 18;
+    console.log("MockStablecoin (dUSD) implantado em:", tokenAddress);
+  }
 
   // 2) protocolo
-  const bond = ethers.parseEther(process.env.RESOLUTION_BOND || "10"); // 10 dUSD
+  // bond nas unidades REAIS do token (USDC=6 → "10" = 10_000_000; dUSD=18).
+  const bond = ethers.parseUnits(process.env.RESOLUTION_BOND || "10", tokenDecimals);
   const treasury = process.env.TREASURY_ADDRESS || deployer.address;
   const Divinatio = await ethers.getContractFactory("Divinatio");
   const divinatio = await Divinatio.deploy(treasury, tokenAddress, bond);

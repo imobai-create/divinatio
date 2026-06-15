@@ -41,6 +41,15 @@ module.exports = {
     },
   },
   networks: {
+    // MAINNET — Base (chainId 8453). USDC real:
+    //   0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 (6 decimais)
+    // Para deploy em mainnet defina TOKEN_ADDRESS=<USDC> (assim NÃO implanta o
+    // dUSD de teste). Use uma PRIVATE_KEY com ETH real na Base.
+    base: {
+      url: process.env.RPC_URL || "https://mainnet.base.org",
+      chainId: 8453,
+      accounts,
+    },
     // Testnets públicas: defina PRIVATE_KEY (carteira com fundos de faucet)
     baseSepolia: {
       url: process.env.RPC_URL || "https://sepolia.base.org",

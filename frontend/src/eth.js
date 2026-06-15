@@ -52,6 +52,10 @@ export function hasWallet() {
 // No modo local a rede é o nó interno (chainId 31337); no modo public é a
 // Base Sepolia (84532). Outras redes caem no rótulo genérico.
 const CHAIN_META = {
+  8453: {
+    chainName: "Base",
+    blockExplorerUrls: ["https://basescan.org"],
+  },
   84532: {
     chainName: "Base Sepolia",
     blockExplorerUrls: ["https://sepolia.basescan.org"],
@@ -161,7 +165,8 @@ export async function faucet() {
 }
 
 export async function predict(marketId, outcome, amount) {
-  const amountWei = parseEther(String(amount));
+  await getConfig(); // garante que os decimais do token estão carregados
+  const amountWei = toUnits(amount);
   await ensureAllowance(amountWei);
   const { divinatio } = await contracts();
   const tx = await divinatio.predict(marketId, outcome, amountWei);
@@ -187,7 +192,8 @@ export async function claim(marketId) {
 }
 
 export async function follow(prophet, amountPerMarket) {
-  const amountWei = parseEther(String(amountPerMarket));
+  await getConfig(); // garante que os decimais do token estão carregados
+  const amountWei = toUnits(amountPerMarket);
   await ensureAllowance(amountWei);
   const { divinatio } = await contracts();
   const tx = await divinatio.follow(prophet, amountWei);

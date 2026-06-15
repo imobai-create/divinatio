@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../api";
 import { predict, claim } from "../eth";
-import { CURRENCY, parseQuestion, fmtEth, shortAddr, PROTOCOL_FEE_BPS } from "../util";
+import { CURRENCY, parseQuestion, fmtEth, shortAddr, PROTOCOL_FEE_BPS, toUnits } from "../util";
 import { OddsList, StateBadge, Countdown } from "../components";
 import MarketChart from "../MarketChart";
 
@@ -23,7 +23,9 @@ export default function MarketPage({ account, onConnect, notify }) {
   const estimate = useMemo(() => {
     if (!market || !amount || Number(amount) <= 0) return null;
     try {
-      const stake = BigInt(Math.round(Number(amount) * 1e18));
+      // converte o valor humano para unidades cruas do token (decimais do
+      // /api/config: USDC=6, dUSD=18) — os pools também estão em unidades cruas.
+      const stake = toUnits(amount);
       let losing = 0n;
       market.pools.forEach((p, i) => {
         if (i !== selected) losing += BigInt(p);
@@ -53,7 +55,7 @@ export default function MarketPage({ account, onConnect, notify }) {
     setBusy(true);
     try {
       await predict(market.id, selected, amount);
-      notify(`Previsão registrada: ${amount} dUSD em "${labels[selected]}" 🔮`, "success");
+      notify(`Previsão registrada: ${amount} ${CURRENCY} em "${labels[selected]}" 🔮`, "success");
       load();
     } catch (e) {
       notify(e.shortMessage || e.message, "error");
