@@ -10,6 +10,27 @@ export default defineConfig({
   css: {
     postcss: { plugins: [] },
   },
+  build: {
+    // Divide o bundle em pedaços separados (vendor) para carregar em paralelo
+    // e cachear: a biblioteca de login (Privy) é grande, então fica num chunk
+    // próprio em vez de inflar o pacote principal.
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        // Separa só as libs estáveis (cacheáveis) em chunks próprios. O Privy
+        // NÃO é agrupado de propósito: assim o Rollup preserva o
+        // carregamento sob demanda interno dele (modais de login só baixam
+        // quando o usuário clica em "Entrar").
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (/[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/.test(id)) {
+            return "react";
+          }
+          if (/[\\/]node_modules[\\/]ethers[\\/]/.test(id)) return "ethers";
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

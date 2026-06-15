@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Routes, Route } from "react-router-dom";
 import { usePrivy } from "@privy-io/react-auth";
 import { Navbar, Footer, ToastStack } from "./components";
 import { connectWallet, tokenBalance, faucet, prepareNetwork, requestGas } from "./eth";
 import { WalletBridge } from "./wallet";
 import { CURRENCY } from "./util";
-import Home from "./pages/Home";
-import MarketPage from "./pages/MarketPage";
-import Leaderboard from "./pages/Leaderboard";
-import CreateMarket from "./pages/CreateMarket";
+
+// Páginas carregadas sob demanda (code-splitting): cada rota só baixa o seu
+// código quando é aberta, deixando o carregamento inicial mais leve.
+const Home = lazy(() => import("./pages/Home"));
+const MarketPage = lazy(() => import("./pages/MarketPage"));
+const Leaderboard = lazy(() => import("./pages/Leaderboard"));
+const CreateMarket = lazy(() => import("./pages/CreateMarket"));
 
 export default function App() {
   const { ready, authenticated, login, logout } = usePrivy();
@@ -113,6 +116,13 @@ export default function App() {
         onLogout={account ? onLogout : null}
       />
       <main>
+        <Suspense
+          fallback={
+            <div className="container" style={{ padding: "60px 24px" }}>
+              <div className="skeleton" />
+            </div>
+          }
+        >
         <Routes>
           <Route path="/" element={<Home />} />
           <Route
@@ -128,6 +138,7 @@ export default function App() {
             element={<CreateMarket account={account} onConnect={onConnect} notify={notify} />}
           />
         </Routes>
+        </Suspense>
       </main>
       <Footer />
       <ToastStack toasts={toasts} />
