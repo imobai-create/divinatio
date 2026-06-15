@@ -3,6 +3,14 @@ const ABI = require("../shared/DivinatioABI.json");
 
 const STATE_LABELS = ["open", "proposed", "disputed", "resolved", "cancelled"];
 
+// ABI mínimo do ERC-20 para ler metadados (decimals/symbol) do token usado pelo
+// protocolo. USDC tem 6 decimais; o dUSD de teste tem 18. O sistema precisa
+// saber disso para formatar valores corretamente no frontend.
+const TOKEN_META_ABI = [
+  "function decimals() view returns (uint8)",
+  "function symbol() view returns (string)",
+];
+
 /**
  * Indexador em memória: faz polling do contrato e dos eventos para servir a
  * API sem que cada requisição bata na blockchain. Para produção, trocar por
@@ -28,6 +36,11 @@ class Indexer {
     // (ex.: Base Sepolia) começar do bloco 0 leria milhões de blocos.
     this.lastBlock = startBlock - 1;
     this.ready = false;
+
+    // Metadados do token (lidos uma vez, com cache). Default seguro = dUSD/18.
+    this.tokenDecimals = 18;
+    this.currencySymbol = "dUSD";
+    this.tokenMetaLoaded = false;
 
     if (process.env.KEEPER_PRIVATE_KEY) {
       const wallet = new ethers.Wallet(process.env.KEEPER_PRIVATE_KEY, this.provider);
@@ -61,7 +74,32 @@ class Indexer {
     return ts;
   }
 
+  // Lê decimals()/symbol() do token do protocolo UMA vez e cacheia. Resiliente:
+  // se a leitura falhar, mantém os defaults (dUSD/18) e tenta de novo depois.
+  async loadTokenMeta() {
+    if (this.tokenMetaLoaded) return;
+    try {
+      const tokenAddress = await this.contract.token();
+      const token = new ethers.Contract(tokenAddress, TOKEN_META_ABI, this.provider);
+      const decimals = Number(await token.decimals());
+      if (Number.isFinite(decimals) && decimals >= 0 && decimals <= 36) {
+        this.tokenDecimals = decimals;
+      }
+      try {
+        const symbol = await token.symbol();
+        if (symbol) this.currencySymbol = symbol;
+      } catch {
+        /* mantém o símbolo default */
+      }
+      this.tokenMetaLoaded = true;
+    } catch (e) {
+      // mantém defaults; tenta de novo no próximo ciclo
+      console.error("leitura de decimals/symbol do token falhou (usando defaults):", e.message);
+    }
+  }
+
   async start() {
+    await this.loadTokenMeta();
     try {
       await this.sync();
     } catch (e) {
@@ -81,6 +119,10 @@ class Indexer {
   }
 
   async _sync() {
+    // Garante que os metadados do token estão carregados (caso start() tenha
+    // falhado na primeira tentativa). Idempotente após o primeiro sucesso.
+    if (!this.tokenMetaLoaded) await this.loadTokenMeta();
+
     const latest = await this.provider.getBlockNumber();
 
     // 1) MERCADOS PRIMEIRO (leitura de estado: marketCount/getMarket). Carrega
@@ -214,6 +256,11 @@ class Indexer {
         }
       }
     }
+  }
+
+  // Metadados do token para o /api/config (decimais + símbolo da moeda).
+  getTokenMeta() {
+    return { tokenDecimals: this.tokenDecimals, currencySymbol: this.currencySymbol };
   }
 
   getMarkets() {
