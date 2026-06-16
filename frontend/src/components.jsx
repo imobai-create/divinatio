@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { CURRENCY, STATE_PT, parseQuestion, poolShares, impliedMultipliers, fmtEth, timeLeft } from "./util";
 
-export function Navbar({ account, balance, onConnect, onFaucet, onLogout }) {
+export function Navbar({ account, balance, onConnect, onFaucet, onAddFunds, isMainnet, onLogout }) {
   return (
     <nav className="navbar">
       <div className="container navbar-inner">
@@ -14,11 +14,16 @@ export function Navbar({ account, balance, onConnect, onFaucet, onLogout }) {
           <NavLink to="/profetas">Profetas</NavLink>
           <NavLink to="/criar">Criar mercado</NavLink>
         </div>
-        {account && (
-          <button className="btn" onClick={onFaucet} title={`Receba 1.000 ${CURRENCY} de teste`}>
-            🚰 {balance !== null ? `${fmtEth(balance, 0)} ${CURRENCY}` : "…"}
-          </button>
-        )}
+        {account &&
+          (isMainnet ? (
+            <button className="btn btn-gold" onClick={onAddFunds} title="Adicionar fundos com PIX ou cartão">
+              💳 {balance !== null ? `${fmtEth(balance, 0)} ${CURRENCY}` : "Adicionar fundos"}
+            </button>
+          ) : (
+            <button className="btn" onClick={onFaucet} title={`Receba 1.000 ${CURRENCY} de teste`}>
+              🚰 {balance !== null ? `${fmtEth(balance, 0)} ${CURRENCY}` : "…"}
+            </button>
+          ))}
         {account ? (
           <button
             className="btn btn-wallet"
