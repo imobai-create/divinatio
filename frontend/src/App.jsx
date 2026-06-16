@@ -1,8 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Routes, Route } from "react-router-dom";
-import { usePrivy } from "@privy-io/react-auth";
+import { usePrivy, useFundWallet } from "@privy-io/react-auth";
 import { Navbar, Footer, ToastStack } from "./components";
-import { connectWallet, tokenBalance, faucet, prepareNetwork, requestGas } from "./eth";
+import { connectWallet, tokenBalance, faucet, prepareNetwork, requestGas, getConfig } from "./eth";
 import { WalletBridge } from "./wallet";
 import { CURRENCY } from "./util";
 
@@ -15,9 +15,19 @@ const CreateMarket = lazy(() => import("./pages/CreateMarket"));
 
 export default function App() {
   const { ready, authenticated, login, logout } = usePrivy();
+  const { fundWallet } = useFundWallet();
   const [account, setAccount] = useState(null);
   const [balance, setBalance] = useState(null);
+  // mainnet (Base 8453) = dinheiro real: mostra "Adicionar fundos" (PIX/cartão)
+  // no lugar do faucet de teste. Testnet continua com o faucet de dUSD.
+  const [isMainnet, setIsMainnet] = useState(false);
   const [toasts, setToasts] = useState([]);
+
+  useEffect(() => {
+    getConfig()
+      .then((c) => setIsMainnet(Number(c.chainId) === 8453))
+      .catch(() => {});
+  }, []);
 
   const notify = useCallback((message, type = "success") => {
     const id = Date.now() + Math.random();
@@ -92,6 +102,19 @@ export default function App() {
     }
   }, [account, notify, refreshBalance]);
 
+  // Rampa de PIX/cartão (mainnet): abre o fluxo de compra do Privy — o usuário
+  // paga com PIX/cartão e recebe USDC na própria carteira (não-custodial: a
+  // plataforma não toca no dinheiro). Requer o provedor configurado no Privy.
+  const onAddFunds = useCallback(async () => {
+    if (!account) return onConnect();
+    try {
+      await fundWallet(account);
+      refreshBalance(account);
+    } catch (e) {
+      notify(e.shortMessage || e.message || "Não foi possível abrir a tela de pagamento.", "error");
+    }
+  }, [account, fundWallet, onConnect, notify, refreshBalance]);
+
   // MetaMask injetada: reage à troca de conta (só quando NÃO está usando Privy)
   useEffect(() => {
     if (typeof window === "undefined" || !window.ethereum?.on) return;
@@ -113,6 +136,8 @@ export default function App() {
         balance={balance}
         onConnect={onConnect}
         onFaucet={onFaucet}
+        onAddFunds={onAddFunds}
+        isMainnet={isMainnet}
         onLogout={account ? onLogout : null}
       />
       <main>
