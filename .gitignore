@@ -4,3 +4,8 @@ artifacts/
 coverage/
 .env
 frontend/dist/
+
+# Slither
+artifacts/
+cache/
+.solc-select/
