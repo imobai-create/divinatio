@@ -5,6 +5,7 @@ import { Navbar, Footer, ToastStack } from "./components";
 import { connectWallet, tokenBalance, faucet, prepareNetwork, requestGas, getConfig } from "./eth";
 import { WalletBridge } from "./wallet";
 import { CURRENCY } from "./util";
+import Disclaimer from "./Disclaimer";
 
 // Páginas carregadas sob demanda (code-splitting): cada rota só baixa o seu
 // código quando é aberta, deixando o carregamento inicial mais leve.
@@ -130,6 +131,7 @@ export default function App() {
 
   return (
     <>
+      <Disclaimer />
       <WalletBridge onChange={handleWalletChange} />
       <Navbar
         account={account}
