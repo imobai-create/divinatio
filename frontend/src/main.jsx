@@ -2,7 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { PrivyProvider } from "@privy-io/react-auth";
-import { baseSepolia } from "viem/chains";
+import { base, baseSepolia } from "viem/chains";
 import App from "./App";
 import "./styles.css";
 
@@ -17,8 +17,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       config={{
         loginMethods: ["email", "google", "wallet"],
         embeddedWallets: { createOnLogin: "users-without-wallets" },
-        defaultChain: baseSepolia,
-        supportedChains: [baseSepolia],
+        // Suporta mainnet (Base 8453) e testnet (Base Sepolia 84532). A rede
+        // efetiva é alinhada em runtime pelo /api/config (ensureNetwork no
+        // eth.js). defaultChain = mainnet (destino com dinheiro real).
+        defaultChain: base,
+        supportedChains: [base, baseSepolia],
         appearance: {
           theme: "dark",
           accentColor: "#7c5cff",
