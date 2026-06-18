@@ -26,10 +26,13 @@ if (process.env.USE_NATIVE_SOLC !== "1") {
   });
 }
 
-// Normaliza a chave: aceita com ou sem o prefixo "0x" (a MetaMask exporta sem).
-const rawKey = process.env.PRIVATE_KEY;
+// Normaliza a chave: tira espaços em volta (colar do navegador costuma trazer
+// um espaço) e aceita com ou sem o prefixo "0x" (a MetaMask exporta sem). O
+// trim vem ANTES da checagem do prefixo para não gerar "0x0x..." nem chave
+// "curta demais" por causa de um espaço perdido.
+const rawKey = process.env.PRIVATE_KEY && process.env.PRIVATE_KEY.trim();
 const accounts = rawKey
-  ? [rawKey.startsWith("0x") ? rawKey.trim() : "0x" + rawKey.trim()]
+  ? [rawKey.startsWith("0x") ? rawKey : "0x" + rawKey]
   : [];
 
 /** @type import('hardhat/config').HardhatUserConfig */
