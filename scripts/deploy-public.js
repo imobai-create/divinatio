@@ -47,7 +47,7 @@ async function main() {
     const erc20 = new ethers.Contract(
       tokenAddress,
       ["function decimals() view returns (uint8)", "function symbol() view returns (string)"],
-      ethers.provider
+      deployer
     );
     tokenDecimals = Number(await erc20.decimals());
     let sym = "?";
