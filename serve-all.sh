@@ -21,10 +21,27 @@ if [ "${CHAIN_MODE:-local}" = "public" ]; then
   if [ "${DEPLOY:-}" = "1" ] && [ -n "${PRIVATE_KEY:-}" ] && [ -z "${CONTRACT_ADDRESS:-}" ]; then
     NET="${DEPLOY_NETWORK:-baseSepolia}"
     echo "🚀 Implantando contratos na cadeia pública ($NET) — uma vez..."
-    npx hardhat run scripts/deploy-public.js --network "$NET" | tee /tmp/divinatio-deploy.txt
+    # Sem 'set -e' aqui para conseguirmos capturar o código de saída do deploy
+    # (o pipe com tee mascararia uma falha do hardhat). Checamos manualmente.
+    set +e
+    npx hardhat run scripts/deploy-public.js --network "$NET" 2>&1 | tee /tmp/divinatio-deploy.txt
+    deploy_status=${PIPESTATUS[0]}
+    set -e
     export CONTRACT_ADDRESS=$(grep '^CONTRACT_ADDRESS=' /tmp/divinatio-deploy.txt | tail -1 | cut -d= -f2 | tr -d '\r')
     export TOKEN_ADDRESS=$(grep '^TOKEN_ADDRESS=' /tmp/divinatio-deploy.txt | tail -1 | cut -d= -f2 | tr -d '\r')
     export START_BLOCK=$(grep '^START_BLOCK=' /tmp/divinatio-deploy.txt | tail -1 | cut -d= -f2 | tr -d '\r')
+    # Falha do deploy = NÃO subir com os endereços-padrão (placeholders) do
+    # backend. Abortamos com uma mensagem clara para o erro aparecer na Railway.
+    if [ "$deploy_status" -ne 0 ] || [ -z "$CONTRACT_ADDRESS" ]; then
+      echo "════════════════════════════════════════════════════════════"
+      echo "❌ O DEPLOY FALHOU — o serviço NÃO vai subir com endereços falsos."
+      echo "   Veja o erro acima. Causas mais comuns:"
+      echo "     • PRIVATE_KEY inválida (curta/errada) — deve ser a CHAVE PRIVADA"
+      echo "       (64 caracteres), não o endereço da carteira."
+      echo "     • Saldo de ETH insuficiente na carteira de deploy."
+      echo "════════════════════════════════════════════════════════════"
+      exit 1
+    fi
     echo "════════════════════════════════════════════════════════════"
     echo "⚠️  COPIE estes 3 para as VARIÁVEIS da Railway e remova DEPLOY=1:"
     echo "    CONTRACT_ADDRESS=$CONTRACT_ADDRESS"
