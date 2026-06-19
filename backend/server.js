@@ -33,8 +33,10 @@ app.use(express.json());
 const source = MOCK ? mockApi() : null;
 // START_BLOCK = bloco do deploy (evita varrer milhões de blocos numa cadeia pública).
 const START_BLOCK = Number(process.env.START_BLOCK || 0);
-// Intervalo de polling do indexador (8s por padrão): menos carga no RPC público.
-const POLL_MS = Number(process.env.POLL_MS) || 8000;
+// Intervalo de polling do indexador. No modo público (RPC externo, possivelmente
+// com muitos mercados), usamos um intervalo maior por padrão para não saturar o
+// RPC; no local, 8s. Pode ser sobrescrito por POLL_MS.
+const POLL_MS = Number(process.env.POLL_MS) || (PUBLIC ? 15000 : 8000);
 const indexer = MOCK ? null : new Indexer(RPC_URL, CONTRACT_ADDRESS, POLL_MS, START_BLOCK);
 
 app.get("/api/health", (req, res) => {

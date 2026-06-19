@@ -49,6 +49,23 @@ class Indexer {
     }
   }
 
+  // RPCs públicos (Base mainnet/Sepolia) falham de forma INTERMITENTE sob carga
+  // (retornam "missing revert data"/429 numa chamada e funcionam na seguinte).
+  // Tenta de novo algumas vezes com um pequeno backoff antes de desistir, para
+  // que uma falha pontual não derrube o ciclo inteiro de leitura.
+  async _retry(fn, tries = 4) {
+    let lastErr;
+    for (let i = 0; i < tries; i++) {
+      try {
+        return await fn();
+      } catch (e) {
+        lastErr = e;
+        await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+      }
+    }
+    throw lastErr;
+  }
+
   // RPCs públicos (Base Sepolia) limitam eth_getLogs a ~2000 blocos por
   // consulta. Fatia o intervalo em janelas seguras e junta os resultados.
   async queryChunked(filter, from, to) {
@@ -79,9 +96,9 @@ class Indexer {
   async loadTokenMeta() {
     if (this.tokenMetaLoaded) return;
     try {
-      const tokenAddress = await this.contract.token();
+      const tokenAddress = await this._retry(() => this.contract.token());
       const token = new ethers.Contract(tokenAddress, TOKEN_META_ABI, this.provider);
-      const decimals = Number(await token.decimals());
+      const decimals = Number(await this._retry(() => token.decimals()));
       if (Number.isFinite(decimals) && decimals >= 0 && decimals <= 36) {
         this.tokenDecimals = decimals;
       }
@@ -127,28 +144,44 @@ class Indexer {
 
     // 1) MERCADOS PRIMEIRO (leitura de estado: marketCount/getMarket). Carrega
     // sempre, mesmo que a leitura de EVENTOS abaixo falhe no RPC público.
-    const count = Number(await this.contract.marketCount());
+    // RESILIENTE: cada getMarket tem retry; se um mercado específico ainda
+    // assim falhar, reaproveitamos a versão já em memória (em vez de zerar a
+    // lista toda) — assim uma glitch pontual do RPC não apaga os mercados.
+    const count = Number(await this._retry(() => this.contract.marketCount()));
+    const prevById = new Map(this.markets.map((m) => [m.id, m]));
     const markets = [];
     for (let id = 0; id < count; id++) {
-      const m = await this.contract.getMarket(id);
-      const pools = m.pools.map((p) => p.toString());
-      const total = m.pools.reduce((acc, p) => acc + p, 0n);
-      markets.push({
-        id,
-        creator: m.creator,
-        question: m.question,
-        outcomeCount: Number(m.outcomeCount),
-        closeTime: Number(m.closeTime),
-        resolutionDeadline: Number(m.resolutionDeadline),
-        state: STATE_LABELS[Number(m.state)],
-        finalOutcome: Number(m.state) === 3 ? Number(m.finalOutcome) : null,
-        pools,
-        totalPool: total.toString(),
-        predictionCount: (this.predictionsByMarket.get(id) || []).length,
-      });
+      try {
+        const m = await this._retry(() => this.contract.getMarket(id));
+        const pools = m.pools.map((p) => p.toString());
+        const total = m.pools.reduce((acc, p) => acc + p, 0n);
+        markets.push({
+          id,
+          creator: m.creator,
+          question: m.question,
+          outcomeCount: Number(m.outcomeCount),
+          closeTime: Number(m.closeTime),
+          resolutionDeadline: Number(m.resolutionDeadline),
+          state: STATE_LABELS[Number(m.state)],
+          finalOutcome: Number(m.state) === 3 ? Number(m.finalOutcome) : null,
+          pools,
+          totalPool: total.toString(),
+          predictionCount: (this.predictionsByMarket.get(id) || []).length,
+        });
+      } catch (e) {
+        const prev = prevById.get(id);
+        if (prev) {
+          markets.push(prev); // mantém o que já tínhamos deste mercado
+        } else {
+          console.error(`getMarket(${id}) falhou (sem cache, pula):`, e.message);
+        }
+      }
     }
-    this.markets = markets;
-    this.ready = true;
+    // Só substitui a lista se conseguimos ler algo; nunca rebaixa para vazio.
+    if (markets.length > 0 || count === 0) {
+      this.markets = markets;
+      this.ready = true;
+    }
 
     // 2) EVENTOS (apostas/follows) e reputação — RESILIENTE: se o RPC público
     // falhar aqui (rate limit, etc.), os mercados continuam carregados e
