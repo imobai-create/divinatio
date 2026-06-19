@@ -21,10 +21,20 @@ const TOKEN_META_ABI = [
  * executa copyPredict para os seguidores automaticamente.
  */
 class Indexer {
-  constructor(rpcUrl, contractAddress, pollMs = 5000, startBlock = 0) {
-    this.provider = new ethers.JsonRpcProvider(rpcUrl);
+  constructor(rpcUrl, contractAddress, pollMs = 5000, startBlock = 0, readSpacingMs = 0) {
+    // staticNetwork evita uma chamada eth_chainId antes de CADA request (ethers
+    // redetecta a rede por padrão), o que dobra o número de chamadas e ajuda a
+    // estourar o rate limit de RPCs públicos. batchMaxCount baixo evita lotes
+    // grandes que alguns RPCs públicos rejeitam por inteiro.
+    this.provider = new ethers.JsonRpcProvider(rpcUrl, undefined, {
+      staticNetwork: true,
+      batchMaxCount: 1,
+    });
     this.contract = new ethers.Contract(contractAddress, ABI, this.provider);
     this.pollMs = pollMs;
+    // Pausa entre leituras de mercado (ms): no modo público, espaça as chamadas
+    // getMarket para não disparar o rate limit do RPC ao ler muitos mercados.
+    this.readSpacingMs = readSpacingMs;
     this.markets = [];
     this.predictionsByMarket = new Map(); // marketId => [{diviner, outcome, amount, txHash, timestamp}]
     this.blockTimestamps = new Map(); // blockNumber => unixSeconds (cache)
@@ -151,6 +161,13 @@ class Indexer {
     const prevById = new Map(this.markets.map((m) => [m.id, m]));
     const markets = [];
     for (let id = 0; id < count; id++) {
+      const prev = prevById.get(id);
+      // Mercados em estado terminal (resolvido/cancelado) não mudam mais:
+      // reaproveita o cache e evita uma chamada RPC desnecessária.
+      if (prev && (prev.state === "resolved" || prev.state === "cancelled")) {
+        markets.push(prev);
+        continue;
+      }
       try {
         const m = await this._retry(() => this.contract.getMarket(id));
         const pools = m.pools.map((p) => p.toString());
@@ -169,12 +186,15 @@ class Indexer {
           predictionCount: (this.predictionsByMarket.get(id) || []).length,
         });
       } catch (e) {
-        const prev = prevById.get(id);
         if (prev) {
           markets.push(prev); // mantém o que já tínhamos deste mercado
         } else {
           console.error(`getMarket(${id}) falhou (sem cache, pula):`, e.message);
         }
+      }
+      // espaça as chamadas para não saturar o RPC público (somente se configurado)
+      if (this.readSpacingMs && id < count - 1) {
+        await new Promise((r) => setTimeout(r, this.readSpacingMs));
       }
     }
     // Só substitui a lista se conseguimos ler algo; nunca rebaixa para vazio.

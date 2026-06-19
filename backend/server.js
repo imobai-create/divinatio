@@ -37,7 +37,12 @@ const START_BLOCK = Number(process.env.START_BLOCK || 0);
 // com muitos mercados), usamos um intervalo maior por padrão para não saturar o
 // RPC; no local, 8s. Pode ser sobrescrito por POLL_MS.
 const POLL_MS = Number(process.env.POLL_MS) || (PUBLIC ? 15000 : 8000);
-const indexer = MOCK ? null : new Indexer(RPC_URL, CONTRACT_ADDRESS, POLL_MS, START_BLOCK);
+// Espaçamento entre leituras de mercado: no modo público, 75ms entre cada
+// getMarket evita estourar o rate limit do RPC ao varrer muitos mercados.
+const READ_SPACING_MS = Number(process.env.READ_SPACING_MS) || (PUBLIC ? 75 : 0);
+const indexer = MOCK
+  ? null
+  : new Indexer(RPC_URL, CONTRACT_ADDRESS, POLL_MS, START_BLOCK, READ_SPACING_MS);
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, ready: MOCK ? true : indexer.ready, mock: MOCK, contract: CONTRACT_ADDRESS, token: TOKEN_ADDRESS });
