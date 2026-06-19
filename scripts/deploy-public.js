@@ -42,7 +42,12 @@ async function main() {
   let tokenAddress;
   let tokenDecimals;
   if (process.env.TOKEN_ADDRESS) {
-    tokenAddress = process.env.TOKEN_ADDRESS;
+    // Normaliza o endereço: tira espaços/quebras de linha (colar no painel da
+    // Railway costuma trazer um espaço) e valida via getAddress. Sem isso, um
+    // endereço "sujo" não bate no formato hex do ethers, que então tenta tratá-lo
+    // como nome ENS e chama resolveName() — derrubando o deploy com
+    // "HardhatEthersProvider.resolveName is not implemented".
+    tokenAddress = ethers.getAddress(process.env.TOKEN_ADDRESS.trim());
     // lê os decimais REAIS do token (USDC = 6) para dimensionar o bond
     const erc20 = new ethers.Contract(
       tokenAddress,
@@ -65,7 +70,9 @@ async function main() {
   // 2) protocolo
   // bond nas unidades REAIS do token (USDC=6 → "10" = 10_000_000; dUSD=18).
   const bond = ethers.parseUnits(process.env.RESOLUTION_BOND || "10", tokenDecimals);
-  const treasury = process.env.TREASURY_ADDRESS || deployer.address;
+  const treasury = process.env.TREASURY_ADDRESS
+    ? ethers.getAddress(process.env.TREASURY_ADDRESS.trim())
+    : deployer.address;
   const Divinatio = await ethers.getContractFactory("Divinatio");
   const divinatio = await Divinatio.deploy(treasury, tokenAddress, bond);
   await divinatio.waitForDeployment();
