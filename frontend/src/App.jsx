@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Routes, Route } from "react-router-dom";
 import { usePrivy, useFundWallet } from "@privy-io/react-auth";
+import { base } from "viem/chains";
 import { Navbar, Footer, ToastStack } from "./components";
 import { connectWallet, tokenBalance, faucet, prepareNetwork, requestGas, getConfig } from "./eth";
 import { WalletBridge } from "./wallet";
@@ -109,7 +110,14 @@ export default function App() {
   const onAddFunds = useCallback(async () => {
     if (!account) return onConnect();
     try {
-      await fundWallet(account);
+      // Compra de USDC na Base via Privy/MoonPay. Nesta versão da Privy o
+      // fundWallet recebe { address, options }: pedir o ativo USDC exige um
+      // amount (valor inicial sugerido; o usuário ajusta na tela). PIX aparece
+      // para usuários no Brasil (default configurado no PrivyProvider).
+      await fundWallet({
+        address: account,
+        options: { chain: base, asset: "USDC", amount: "10" },
+      });
       refreshBalance(account);
     } catch (e) {
       notify(e.shortMessage || e.message || "Não foi possível abrir a tela de pagamento.", "error");
