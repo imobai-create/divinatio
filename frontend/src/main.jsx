@@ -22,6 +22,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(
         // eth.js). defaultChain = mainnet (destino com dinheiro real).
         defaultChain: base,
         supportedChains: [base, baseSepolia],
+        // Rampa de compra (MoonPay): PIX como método padrão (público brasileiro).
+        // O ativo (USDC) e a rede (Base) são passados no fundWallet (App.jsx).
+        fundingMethodConfig: {
+          moonpay: { paymentMethod: "pix_instant_payment" },
+        },
         appearance: {
           theme: "dark",
           accentColor: "#7c5cff",

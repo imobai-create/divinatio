@@ -21,10 +21,20 @@ const TOKEN_META_ABI = [
  * executa copyPredict para os seguidores automaticamente.
  */
 class Indexer {
-  constructor(rpcUrl, contractAddress, pollMs = 5000, startBlock = 0) {
-    this.provider = new ethers.JsonRpcProvider(rpcUrl);
+  constructor(rpcUrl, contractAddress, pollMs = 5000, startBlock = 0, readSpacingMs = 0) {
+    // staticNetwork evita uma chamada eth_chainId antes de CADA request (ethers
+    // redetecta a rede por padrão), o que dobra o número de chamadas e ajuda a
+    // estourar o rate limit de RPCs públicos. batchMaxCount baixo evita lotes
+    // grandes que alguns RPCs públicos rejeitam por inteiro.
+    this.provider = new ethers.JsonRpcProvider(rpcUrl, undefined, {
+      staticNetwork: true,
+      batchMaxCount: 1,
+    });
     this.contract = new ethers.Contract(contractAddress, ABI, this.provider);
     this.pollMs = pollMs;
+    // Pausa entre leituras de mercado (ms): no modo público, espaça as chamadas
+    // getMarket para não disparar o rate limit do RPC ao ler muitos mercados.
+    this.readSpacingMs = readSpacingMs;
     this.markets = [];
     this.predictionsByMarket = new Map(); // marketId => [{diviner, outcome, amount, txHash, timestamp}]
     this.blockTimestamps = new Map(); // blockNumber => unixSeconds (cache)
@@ -47,6 +57,23 @@ class Indexer {
       this.keeperContract = this.contract.connect(wallet);
       console.log("Keeper de copy-staking ativo:", wallet.address);
     }
+  }
+
+  // RPCs públicos (Base mainnet/Sepolia) falham de forma INTERMITENTE sob carga
+  // (retornam "missing revert data"/429 numa chamada e funcionam na seguinte).
+  // Tenta de novo algumas vezes com um pequeno backoff antes de desistir, para
+  // que uma falha pontual não derrube o ciclo inteiro de leitura.
+  async _retry(fn, tries = 4) {
+    let lastErr;
+    for (let i = 0; i < tries; i++) {
+      try {
+        return await fn();
+      } catch (e) {
+        lastErr = e;
+        await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+      }
+    }
+    throw lastErr;
   }
 
   // RPCs públicos (Base Sepolia) limitam eth_getLogs a ~2000 blocos por
@@ -79,9 +106,9 @@ class Indexer {
   async loadTokenMeta() {
     if (this.tokenMetaLoaded) return;
     try {
-      const tokenAddress = await this.contract.token();
+      const tokenAddress = await this._retry(() => this.contract.token());
       const token = new ethers.Contract(tokenAddress, TOKEN_META_ABI, this.provider);
-      const decimals = Number(await token.decimals());
+      const decimals = Number(await this._retry(() => token.decimals()));
       if (Number.isFinite(decimals) && decimals >= 0 && decimals <= 36) {
         this.tokenDecimals = decimals;
       }
@@ -127,28 +154,54 @@ class Indexer {
 
     // 1) MERCADOS PRIMEIRO (leitura de estado: marketCount/getMarket). Carrega
     // sempre, mesmo que a leitura de EVENTOS abaixo falhe no RPC público.
-    const count = Number(await this.contract.marketCount());
+    // RESILIENTE: cada getMarket tem retry; se um mercado específico ainda
+    // assim falhar, reaproveitamos a versão já em memória (em vez de zerar a
+    // lista toda) — assim uma glitch pontual do RPC não apaga os mercados.
+    const count = Number(await this._retry(() => this.contract.marketCount()));
+    const prevById = new Map(this.markets.map((m) => [m.id, m]));
     const markets = [];
     for (let id = 0; id < count; id++) {
-      const m = await this.contract.getMarket(id);
-      const pools = m.pools.map((p) => p.toString());
-      const total = m.pools.reduce((acc, p) => acc + p, 0n);
-      markets.push({
-        id,
-        creator: m.creator,
-        question: m.question,
-        outcomeCount: Number(m.outcomeCount),
-        closeTime: Number(m.closeTime),
-        resolutionDeadline: Number(m.resolutionDeadline),
-        state: STATE_LABELS[Number(m.state)],
-        finalOutcome: Number(m.state) === 3 ? Number(m.finalOutcome) : null,
-        pools,
-        totalPool: total.toString(),
-        predictionCount: (this.predictionsByMarket.get(id) || []).length,
-      });
+      const prev = prevById.get(id);
+      // Mercados em estado terminal (resolvido/cancelado) não mudam mais:
+      // reaproveita o cache e evita uma chamada RPC desnecessária.
+      if (prev && (prev.state === "resolved" || prev.state === "cancelled")) {
+        markets.push(prev);
+        continue;
+      }
+      try {
+        const m = await this._retry(() => this.contract.getMarket(id));
+        const pools = m.pools.map((p) => p.toString());
+        const total = m.pools.reduce((acc, p) => acc + p, 0n);
+        markets.push({
+          id,
+          creator: m.creator,
+          question: m.question,
+          outcomeCount: Number(m.outcomeCount),
+          closeTime: Number(m.closeTime),
+          resolutionDeadline: Number(m.resolutionDeadline),
+          state: STATE_LABELS[Number(m.state)],
+          finalOutcome: Number(m.state) === 3 ? Number(m.finalOutcome) : null,
+          pools,
+          totalPool: total.toString(),
+          predictionCount: (this.predictionsByMarket.get(id) || []).length,
+        });
+      } catch (e) {
+        if (prev) {
+          markets.push(prev); // mantém o que já tínhamos deste mercado
+        } else {
+          console.error(`getMarket(${id}) falhou (sem cache, pula):`, e.message);
+        }
+      }
+      // espaça as chamadas para não saturar o RPC público (somente se configurado)
+      if (this.readSpacingMs && id < count - 1) {
+        await new Promise((r) => setTimeout(r, this.readSpacingMs));
+      }
     }
-    this.markets = markets;
-    this.ready = true;
+    // Só substitui a lista se conseguimos ler algo; nunca rebaixa para vazio.
+    if (markets.length > 0 || count === 0) {
+      this.markets = markets;
+      this.ready = true;
+    }
 
     // 2) EVENTOS (apostas/follows) e reputação — RESILIENTE: se o RPC público
     // falhar aqui (rate limit, etc.), os mercados continuam carregados e

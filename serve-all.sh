@@ -49,6 +49,14 @@ if [ "${CHAIN_MODE:-local}" = "public" ]; then
     echo "    START_BLOCK=$START_BLOCK"
     echo "════════════════════════════════════════════════════════════"
   fi
+  # Top-up de mercados: se ENSURE_MARKETS estiver definido (ex.: 100), garante
+  # esse total no contrato JÁ implantado (idempotente: não duplica; se já houver
+  # o suficiente, não faz nada). Não bloqueia o serviço se falhar.
+  if [ -n "${ENSURE_MARKETS:-}" ] && [ -n "${PRIVATE_KEY:-}" ] && [ -n "${CONTRACT_ADDRESS:-}" ]; then
+    echo "🧩 Garantindo ${ENSURE_MARKETS} mercados em ${CONTRACT_ADDRESS}..."
+    npx hardhat run scripts/ensure-markets.js --network "${DEPLOY_NETWORK:-base}" \
+      || echo "⚠️  ensure-markets falhou (segue servindo mesmo assim)."
+  fi
   echo "🌐 Modo PÚBLICO: indexando cadeia externa (RPC_URL=${RPC_URL:-?})."
   exec node backend/server.js
 fi
