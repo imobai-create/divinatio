@@ -21,6 +21,14 @@ if [ "${CHAIN_MODE:-local}" = "public" ]; then
   if [ "${DEPLOY:-}" = "1" ] && [ -n "${PRIVATE_KEY:-}" ] && [ -z "${CONTRACT_ADDRESS:-}" ]; then
     NET="${DEPLOY_NETWORK:-baseSepolia}"
     echo "🚀 Implantando contratos na cadeia pública ($NET) — uma vez..."
+    # O deploy na Base demora vários minutos (compilar + criar mercados). Para
+    # o healthcheck do Railway não expirar, subimos o servidor IMEDIATAMENTE em
+    # segundo plano — ele responde /api/health com ready=false (sem contrato ainda)
+    # mas já satisfaz o healthcheck. Ao fim do deploy, reiniciamos com os
+    # endereços corretos via exec.
+    node backend/server.js &
+    _WARMUP_PID=$!
+    echo "⏳ Servidor temporário PID=$_WARMUP_PID (healthcheck pré-passado)."
     # Sem 'set -e' aqui para conseguirmos capturar o código de saída do deploy
     # (o pipe com tee mascararia uma falha do hardhat). Checamos manualmente.
     set +e
@@ -30,6 +38,8 @@ if [ "${CHAIN_MODE:-local}" = "public" ]; then
     export CONTRACT_ADDRESS=$(grep '^CONTRACT_ADDRESS=' /tmp/divinatio-deploy.txt | tail -1 | cut -d= -f2 | tr -d '\r')
     export TOKEN_ADDRESS=$(grep '^TOKEN_ADDRESS=' /tmp/divinatio-deploy.txt | tail -1 | cut -d= -f2 | tr -d '\r')
     export START_BLOCK=$(grep '^START_BLOCK=' /tmp/divinatio-deploy.txt | tail -1 | cut -d= -f2 | tr -d '\r')
+    # Para o servidor temporário antes de qualquer saída
+    kill "$_WARMUP_PID" 2>/dev/null; wait "$_WARMUP_PID" 2>/dev/null || true
     # Falha do deploy = NÃO subir com os endereços-padrão (placeholders) do
     # backend. Abortamos com uma mensagem clara para o erro aparecer na Railway.
     if [ "$deploy_status" -ne 0 ] || [ -z "$CONTRACT_ADDRESS" ]; then
