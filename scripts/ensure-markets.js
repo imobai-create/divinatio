@@ -142,6 +142,26 @@ const MARKETS = [
   { q: "O preço do café continua em alta no Brasil no fim de 2026?\nSim\nNão", days: 220 },
 ];
 
+// Reenvia uma transação tolerando colisões de nonce. A torneira de gás
+// (/api/gas) usa a MESMA carteira do deploy; se ela disparar no meio da criação
+// de mercados, o nó rejeita com "nonce too low". Aqui esperamos um pouco e
+// tentamos de novo — o ethers busca o nonce "pending" atualizado a cada envio.
+async function sendWithRetry(makeTx, tries = 6) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const tx = await makeTx();
+      return await tx.wait();
+    } catch (e) {
+      const msg = e.shortMessage || e.message || "";
+      const transient = /nonce too low|nonce has already|replacement transaction|already known|known transaction/i.test(msg);
+      if (!transient || attempt >= tries) throw e;
+      const delay = 1500 * attempt;
+      console.log(`  ↻ nonce/colisão (tentativa ${attempt}): ${msg} — repetindo em ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
 async function main() {
   const target = Number(process.env.ENSURE_MARKETS || process.env.MARKET_TARGET || 100);
   if (!process.env.CONTRACT_ADDRESS) {
@@ -175,9 +195,9 @@ async function main() {
     const close = now + m.days * DAY;
     const outcomeCount = m.q.split("\n").length - 1;
     try {
-      await (
-        await divinatio.createMarket(m.q, outcomeCount, close, close + 2 * DAY, 100)
-      ).wait();
+      await sendWithRetry(() =>
+        divinatio.createMarket(m.q, outcomeCount, close, close + 2 * DAY, 100)
+      );
       created++;
       if (created % 10 === 0) console.log(`  ...${created} criados`);
     } catch (e) {

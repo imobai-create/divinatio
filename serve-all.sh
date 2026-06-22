@@ -26,9 +26,16 @@ if [ "${CHAIN_MODE:-local}" = "public" ]; then
     # segundo plano — ele responde /api/health com ready=false (sem contrato ainda)
     # mas já satisfaz o healthcheck. Ao fim do deploy, reiniciamos com os
     # endereços corretos via exec.
-    node backend/server.js &
+    #
+    # CRÍTICO: a torneira de gás (/api/gas) usa a MESMA chave do deploy. Se um
+    # usuário abrir o site durante o deploy, a torneira manda uma transação ao
+    # mesmo tempo que o createMarket — colidindo o nonce ("nonce too low") e
+    # quebrando o deploy no meio. Por isso desligamos a torneira (GAS_FAUCET_KEY
+    # vazio) e o indexador (SKIP_INDEXER) NESTE servidor temporário; ambos voltam
+    # no servidor final, depois que o deploy termina e a chave fica livre.
+    GAS_FAUCET_KEY="" SKIP_INDEXER=1 node backend/server.js &
     _WARMUP_PID=$!
-    echo "⏳ Servidor temporário PID=$_WARMUP_PID (healthcheck pré-passado)."
+    echo "⏳ Servidor temporário PID=$_WARMUP_PID (healthcheck pré-passado, torneira OFF)."
     # Sem 'set -e' aqui para conseguirmos capturar o código de saída do deploy
     # (o pipe com tee mascararia uma falha do hardhat). Checamos manualmente.
     set +e

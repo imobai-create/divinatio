@@ -192,6 +192,12 @@ function listen() {
 
 if (MOCK) {
   listen();
+} else if (process.env.SKIP_INDEXER === "1") {
+  // Servidor temporário durante o deploy (serve-all.sh): sobe só para o
+  // healthcheck do Railway passar enquanto os contratos são implantados. NÃO
+  // inicia o indexador (ainda não há contrato para ler).
+  console.log("Servidor temporário (SKIP_INDEXER=1): healthcheck-only durante o deploy.");
+  listen();
 } else {
   // Inicia o servidor IMEDIATAMENTE para que o healthcheck passe.
   // O indexador sincroniza em segundo plano; /api/health reporta ready=false
