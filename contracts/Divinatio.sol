@@ -53,6 +53,7 @@ contract Divinatio {
         address proposer;
         address disputer;
         uint64 disputeWindowEnd;
+        uint256 bondAmount;          // caução travada nesta resolução (snapshot do bond)
         uint256[] pools;             // total depositado por desfecho
         uint256 losingPoolNet;       // pool perdedor após taxas (fixado na resolução)
     }
@@ -85,7 +86,7 @@ contract Divinatio {
     uint8 public constant MAX_OUTCOMES = 8;
 
     IERC20 public immutable token;        // stablecoin do protocolo (ex.: USDC)
-    uint256 public immutable resolutionBond;
+    uint256 public resolutionBond;        // caução de resolução, ajustável pelo árbitro
 
     address public owner;                 // árbitro de disputas (DAO no roadmap)
     address public treasury;
@@ -119,6 +120,7 @@ contract Divinatio {
     event OutcomeDisputed(uint256 indexed marketId, address indexed disputer);
     event MarketResolved(uint256 indexed marketId, uint8 outcome);
     event MarketCancelled(uint256 indexed marketId);
+    event ResolutionBondUpdated(uint256 oldBond, uint256 newBond);
     event Claimed(uint256 indexed marketId, address indexed diviner, uint256 payout);
     event Refunded(uint256 indexed marketId, address indexed diviner, uint256 amount);
     event Followed(address indexed follower, address indexed prophet, uint256 amountPerMarket);
@@ -246,10 +248,14 @@ contract Divinatio {
         require(block.timestamp <= m.resolutionDeadline, "Divinatio: resolution deadline passed");
         require(outcome < m.outcomeCount, "Divinatio: invalid outcome");
 
-        _pull(msg.sender, resolutionBond);
+        // congela a caução vigente neste mercado: mudanças futuras no bond não
+        // afetam quem já propôs/contestou (contabilidade exata na devolução).
+        uint256 bond = resolutionBond;
+        _pull(msg.sender, bond);
         m.state = MarketState.Proposed;
         m.proposedOutcome = outcome;
         m.proposer = msg.sender;
+        m.bondAmount = bond;
         m.disputeWindowEnd = uint64(block.timestamp) + DISPUTE_WINDOW;
 
         emit OutcomeProposed(marketId, msg.sender, outcome);
@@ -261,7 +267,7 @@ contract Divinatio {
         require(m.state == MarketState.Proposed, "Divinatio: nothing to dispute");
         require(block.timestamp < m.disputeWindowEnd, "Divinatio: dispute window closed");
 
-        _pull(msg.sender, resolutionBond);
+        _pull(msg.sender, m.bondAmount);
         m.state = MarketState.Disputed;
         m.disputer = msg.sender;
 
@@ -276,7 +282,7 @@ contract Divinatio {
 
         address proposer = m.proposer;
         _settle(marketId, m, m.proposedOutcome);
-        _push(proposer, resolutionBond);
+        _push(proposer, m.bondAmount);
     }
 
     /// @notice O árbitro decide disputas. A caução do perdedor vai para o vencedor.
@@ -288,7 +294,7 @@ contract Divinatio {
 
         address bondWinner = outcome == m.proposedOutcome ? m.proposer : m.disputer;
         _settle(marketId, m, outcome);
-        _push(bondWinner, 2 * resolutionBond);
+        _push(bondWinner, 2 * m.bondAmount);
     }
 
     /// @notice Sem resolução dentro do prazo + carência, o mercado é cancelado
@@ -389,6 +395,15 @@ contract Divinatio {
         owner = newOwner;
     }
 
+    /// @notice Ajusta a caução de resolução (vale para propostas/disputas futuras).
+    /// @dev Não afeta mercados já em estado Proposed/Disputed (que já travaram o
+    ///      valor); aplica-se às próximas chamadas de proposeOutcome/dispute.
+    function setResolutionBond(uint256 newBond) external onlyOwner {
+        require(newBond > 0, "Divinatio: bond is zero");
+        emit ResolutionBondUpdated(resolutionBond, newBond);
+        resolutionBond = newBond;
+    }
+
     // ---------------------------------------------------------------------
     // Leitura
     // ---------------------------------------------------------------------
@@ -413,6 +428,24 @@ contract Divinatio {
     {
         Market storage m = _market(marketId);
         return (m.creator, m.question, m.outcomeCount, m.closeTime, m.resolutionDeadline, m.state, m.finalOutcome, m.pools);
+    }
+
+    /// @notice Dados da resolução otimista de um mercado (para a interface de
+    ///         propor/contestar/finalizar). Separado de getMarket para evitar
+    ///         "stack too deep".
+    function getResolution(uint256 marketId)
+        external
+        view
+        returns (
+            uint8 proposedOutcome,
+            address proposer,
+            address disputer,
+            uint64 disputeWindowEnd,
+            uint256 bondAmount
+        )
+    {
+        Market storage m = _market(marketId);
+        return (m.proposedOutcome, m.proposer, m.disputer, m.disputeWindowEnd, m.bondAmount);
     }
 
     /// @notice Taxa de acerto do profeta em pontos-base (10000 = 100%).

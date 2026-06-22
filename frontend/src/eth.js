@@ -37,6 +37,9 @@ export function getConfig() {
           chainMode: cfg.chainMode || "local",
           tokenDecimals,
           currencySymbol,
+          // árbitro (owner) e caução de resolução (unidades cruas do token)
+          owner: cfg.owner || null,
+          resolutionBond: cfg.resolutionBond || "0",
         };
       });
   }
@@ -188,6 +191,52 @@ export async function createMarket({ question, outcomeCount, closeTime, resoluti
 export async function claim(marketId) {
   const { divinatio } = await contracts();
   const tx = await divinatio.claim(marketId);
+  return tx.wait();
+}
+
+// --- Resolução otimista (qualquer usuário pode propor/contestar/finalizar) ---
+
+/** Propõe o resultado de um mercado fechado, depositando a caução. */
+export async function proposeOutcome(marketId, outcome) {
+  const { resolutionBond } = await getConfig();
+  const { signer, divinatio } = await contracts();
+  await requestGas(await signer.getAddress());
+  await ensureAllowance(BigInt(resolutionBond || "0"));
+  const tx = await divinatio.proposeOutcome(marketId, outcome);
+  return tx.wait();
+}
+
+/** Contesta o resultado proposto, depositando caução igual à travada no mercado. */
+export async function disputeOutcome(marketId, bondAmount) {
+  const { resolutionBond } = await getConfig();
+  const { signer, divinatio } = await contracts();
+  await requestGas(await signer.getAddress());
+  await ensureAllowance(BigInt(bondAmount || resolutionBond || "0"));
+  const tx = await divinatio.dispute(marketId);
+  return tx.wait();
+}
+
+/** Finaliza um mercado proposto após a janela de disputa (devolve a caução ao propositor). */
+export async function finalizeMarket(marketId) {
+  const { signer, divinatio } = await contracts();
+  await requestGas(await signer.getAddress());
+  const tx = await divinatio.finalize(marketId);
+  return tx.wait();
+}
+
+/** Árbitro decide uma disputa (apenas o owner do contrato). */
+export async function resolveDispute(marketId, outcome) {
+  const { signer, divinatio } = await contracts();
+  await requestGas(await signer.getAddress());
+  const tx = await divinatio.resolveDispute(marketId, outcome);
+  return tx.wait();
+}
+
+/** Cancela um mercado sem resolução (após o prazo + carência); reembolsa todos. */
+export async function cancelMarket(marketId) {
+  const { signer, divinatio } = await contracts();
+  await requestGas(await signer.getAddress());
+  const tx = await divinatio.cancelMarket(marketId);
   return tx.wait();
 }
 
