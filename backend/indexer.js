@@ -52,6 +52,11 @@ class Indexer {
     this.currencySymbol = "dUSD";
     this.tokenMetaLoaded = false;
 
+    // Metadados do protocolo para a interface de resolução: árbitro (owner) e
+    // caução de resolução vigente. Relidos a cada ciclo (a caução pode mudar).
+    this.owner = null;
+    this.resolutionBond = "0";
+
     if (process.env.KEEPER_PRIVATE_KEY) {
       const wallet = new ethers.Wallet(process.env.KEEPER_PRIVATE_KEY, this.provider);
       this.keeperContract = this.contract.connect(wallet);
@@ -158,6 +163,17 @@ class Indexer {
     // assim falhar, reaproveitamos a versão já em memória (em vez de zerar a
     // lista toda) — assim uma glitch pontual do RPC não apaga os mercados.
     const count = Number(await this._retry(() => this.contract.marketCount()));
+
+    // árbitro (owner) e caução vigente — para a interface de resolução. Baratos;
+    // relê a cada ciclo (a caução pode mudar via setResolutionBond). Mantém o
+    // valor anterior se falhar.
+    try {
+      this.owner = await this._retry(() => this.contract.owner());
+      this.resolutionBond = (await this._retry(() => this.contract.resolutionBond())).toString();
+    } catch {
+      /* mantém os valores anteriores */
+    }
+
     const prevById = new Map(this.markets.map((m) => [m.id, m]));
     const markets = [];
     for (let id = 0; id < count; id++) {
@@ -172,19 +188,40 @@ class Indexer {
         const m = await this._retry(() => this.contract.getMarket(id));
         const pools = m.pools.map((p) => p.toString());
         const total = m.pools.reduce((acc, p) => acc + p, 0n);
-        markets.push({
+        const stateNum = Number(m.state);
+        const market = {
           id,
           creator: m.creator,
           question: m.question,
           outcomeCount: Number(m.outcomeCount),
           closeTime: Number(m.closeTime),
           resolutionDeadline: Number(m.resolutionDeadline),
-          state: STATE_LABELS[Number(m.state)],
-          finalOutcome: Number(m.state) === 3 ? Number(m.finalOutcome) : null,
+          state: STATE_LABELS[stateNum],
+          finalOutcome: stateNum === 3 ? Number(m.finalOutcome) : null,
           pools,
           totalPool: total.toString(),
           predictionCount: (this.predictionsByMarket.get(id) || []).length,
-        });
+          // dados da resolução otimista (preenchidos só quando proposto/disputado)
+          proposedOutcome: null,
+          proposer: null,
+          disputer: null,
+          disputeWindowEnd: null,
+          bondAmount: null,
+        };
+        // Proposed(1)/Disputed(2): busca o resultado proposto + janela de disputa.
+        if (stateNum === 1 || stateNum === 2) {
+          try {
+            const r = await this._retry(() => this.contract.getResolution(id));
+            market.proposedOutcome = Number(r.proposedOutcome);
+            market.proposer = r.proposer === ethers.ZeroAddress ? null : r.proposer;
+            market.disputer = r.disputer === ethers.ZeroAddress ? null : r.disputer;
+            market.disputeWindowEnd = Number(r.disputeWindowEnd);
+            market.bondAmount = r.bondAmount.toString();
+          } catch {
+            /* sem dados de resolução neste ciclo; tenta no próximo */
+          }
+        }
+        markets.push(market);
       } catch (e) {
         if (prev) {
           markets.push(prev); // mantém o que já tínhamos deste mercado
@@ -314,6 +351,11 @@ class Indexer {
   // Metadados do token para o /api/config (decimais + símbolo da moeda).
   getTokenMeta() {
     return { tokenDecimals: this.tokenDecimals, currencySymbol: this.currencySymbol };
+  }
+
+  // Metadados do protocolo para a interface de resolução: árbitro e caução.
+  getProtocolMeta() {
+    return { owner: this.owner, resolutionBond: this.resolutionBond };
   }
 
   getMarkets() {

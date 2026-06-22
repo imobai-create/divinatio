@@ -152,6 +152,34 @@ describe("Divinatio", function () {
         "Divinatio: caller is not the owner"
       );
     });
+
+    it("caução ajustável: só o árbitro muda; o valor congela por mercado", async function () {
+      // só o árbitro ajusta
+      await expect(divinatio.connect(alice).setResolutionBond(dusd(1))).to.be.revertedWith(
+        "Divinatio: caller is not the owner"
+      );
+      await expect(divinatio.connect(owner).setResolutionBond(dusd(1)))
+        .to.emit(divinatio, "ResolutionBondUpdated")
+        .withArgs(BOND, dusd(1));
+      expect(await divinatio.resolutionBond()).to.equal(dusd(1));
+
+      // novo mercado usa a nova caução (1)
+      const { closeTime } = await createMarket();
+      await divinatio.connect(alice).predict(0, 0, dusd(100));
+      await divinatio.connect(bob).predict(0, 1, dusd(100));
+      await time.increaseTo(closeTime + 1);
+      await expect(divinatio.connect(carol).proposeOutcome(0, 0)).to.changeTokenBalance(
+        token,
+        carol,
+        -dusd(1)
+      );
+
+      // árbitro muda a caução DEPOIS da proposta: a devolução usa o valor
+      // congelado (1), não o novo (5) — contabilidade exata.
+      await divinatio.connect(owner).setResolutionBond(dusd(5));
+      await time.increase(DAY + 1);
+      await expect(divinatio.finalize(0)).to.changeTokenBalance(token, carol, dusd(1));
+    });
   });
 
   describe("pagamentos", function () {

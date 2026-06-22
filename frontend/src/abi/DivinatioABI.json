@@ -286,6 +286,25 @@
     "anonymous": false,
     "inputs": [
       {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "oldBond",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "newBond",
+        "type": "uint256"
+      }
+    ],
+    "name": "ResolutionBondUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
         "indexed": true,
         "internalType": "address",
         "name": "follower",
@@ -731,6 +750,45 @@
     "inputs": [
       {
         "internalType": "uint256",
+        "name": "marketId",
+        "type": "uint256"
+      }
+    ],
+    "name": "getResolution",
+    "outputs": [
+      {
+        "internalType": "uint8",
+        "name": "proposedOutcome",
+        "type": "uint8"
+      },
+      {
+        "internalType": "address",
+        "name": "proposer",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "disputer",
+        "type": "address"
+      },
+      {
+        "internalType": "uint64",
+        "name": "disputeWindowEnd",
+        "type": "uint64"
+      },
+      {
+        "internalType": "uint256",
+        "name": "bondAmount",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
         "name": "",
         "type": "uint256"
       },
@@ -864,6 +922,19 @@
       }
     ],
     "name": "resolveDispute",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "newBond",
+        "type": "uint256"
+      }
+    ],
+    "name": "setResolutionBond",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

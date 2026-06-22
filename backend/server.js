@@ -63,6 +63,8 @@ app.get("/api/config", (req, res) => {
   // do token on-chain). USDC = 6 decimais; dUSD de teste = 18. Default seguro
   // 18/dUSD enquanto a leitura não completou ou no modo vitrine.
   const tokenMeta = indexer ? indexer.getTokenMeta() : { tokenDecimals: 18, currencySymbol: "dUSD" };
+  // Árbitro (owner) e caução de resolução — para a interface de resolução.
+  const protocolMeta = indexer ? indexer.getProtocolMeta() : { owner: null, resolutionBond: "0" };
   res.json({
     contractAddress: CONTRACT_ADDRESS,
     tokenAddress: TOKEN_ADDRESS,
@@ -73,6 +75,8 @@ app.get("/api/config", (req, res) => {
     chainMode: CHAIN_MODE,
     tokenDecimals: tokenMeta.tokenDecimals,
     currencySymbol: tokenMeta.currencySymbol,
+    owner: protocolMeta.owner,
+    resolutionBond: protocolMeta.resolutionBond,
   });
 });
 
