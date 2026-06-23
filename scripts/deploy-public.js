@@ -1,5 +1,25 @@
 const { ethers } = require("hardhat");
 
+// Reenvia uma transação tolerando colisões de nonce. A torneira de gás
+// (/api/gas) usa a MESMA carteira do deploy; se ela disparar no meio da criação
+// de mercados, o nó rejeita com "nonce too low". Esperamos e tentamos de novo —
+// o ethers busca o nonce "pending" atualizado a cada envio.
+async function sendWithRetry(makeTx, tries = 6) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const tx = await makeTx();
+      return await tx.wait();
+    } catch (e) {
+      const msg = e.shortMessage || e.message || "";
+      const transient = /nonce too low|nonce has already|replacement transaction|already known|known transaction/i.test(msg);
+      if (!transient || attempt >= tries) throw e;
+      const delay = 1500 * attempt;
+      console.log(`  ↻ nonce/colisão (tentativa ${attempt}): ${msg} — repetindo em ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
 // Deploy para uma cadeia PÚBLICA e PERMANENTE (ex.: Base Sepolia, chainId 84532).
 //
 // Diferente do scripts/seed.js (que é o seed de DEMONSTRAÇÃO local, com previsões
@@ -113,9 +133,9 @@ async function main() {
   for (const m of markets) {
     const close = now + m.days * DAY;
     const outcomeCount = m.q.split("\n").length - 1;
-    await (
-      await divinatio.connect(deployer).createMarket(m.q, outcomeCount, close, close + 2 * DAY, 100)
-    ).wait();
+    await sendWithRetry(() =>
+      divinatio.connect(deployer).createMarket(m.q, outcomeCount, close, close + 2 * DAY, 100)
+    );
     created++;
   }
   console.log(`${created} mercados REAIS criados (sem nenhuma previsão fake).`);
